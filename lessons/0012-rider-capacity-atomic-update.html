@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>骑手名额：数据库原子更新</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+  <h1>第十二课：骑手名额为什么必须原子地加减</h1>
+  <p>本课只讲本轮新增的三个 Mapper 方法：占用名额、释放名额、停用空闲骑手。它们共同保护 <code>rider.current_order_count</code> 和 <code>rider.status</code>。</p>
+
+  <h2>先明确业务规则</h2>
+  <p>本项目给每名骑手设置最大同时接单数，目前是 3。只有状态为“可接单”的骑手能接新订单；完成订单后释放一个名额；还有进行中订单的骑手不能停用。</p>
+  <pre>可接单 + 当前单数 &lt; 3  → 才能再接一单
+完成一单                → 当前单数 - 1
+可接单 + 当前单数 = 0   → 才能停用</pre>
+
+  <h2>为什么不能“先查，再在 Java 里加一”？</h2>
+  <p>假设骑手当前有 2 单，最大值是 3。订单 A 和订单 B 同时来：</p>
+  <pre>A：查询到 2，小于 3
+B：也查询到 2，小于 3
+A：把值写成 3
+B：也认为自己可以接单</pre>
+  <p>如果代码是“查询后无条件写入”，业务可能让骑手接了 4 单；如果两边都把旧值 2 加成 3 再覆盖，又可能丢掉一次加一。问题依然是：查询结果在真正写入前可能过期。</p>
+
+  <h2>tryClaimForOrder：把检查和加一放进一条 UPDATE</h2>
+  <pre>UPDATE rider
+SET current_order_count = current_order_count + 1
+WHERE id = ?
+  AND status = 1
+  AND current_order_count &lt; 3;</pre>
+  <p>这条 SQL 的白话是：“这名骑手此刻仍可接单，而且当前单数还不到 3，我才给他加一个名额。”数据库对同一行的并发更新进行协调：</p>
+  <pre>当前值是 2
+A 先拿到行更新：2 &lt; 3，改为 3，影响 1 行
+B 等待 A 的行更新完成，再看当前值：3 &lt; 3 不成立，影响 0 行</pre>
+  <p>这里的“原子”不是说整个派单流程只有一步，而是说这条 SQL 内部的资格判断和加一不会被另一个更新插进中间。<code>tryClaimForOrder</code> 返回 1 才算占用成功，返回 0 就换下一个候选骑手或返回“暂无可用骑手”。</p>
+
+  <h2>它在派单流程的哪个位置？</h2>
+  <pre>dispatch / assignRider
+  → 找到附近候选
+  → tryClaimForOrder：先占骑手一个名额
+  → assignIfPending：再把订单绑定给骑手
+  → 两步在 @Transactional 中一起提交</pre>
+  <p>为什么先占名额后更新订单？因为最终要让“骑手接单数”和“订单骑手 ID”保持对应。如果占名额成功，但订单更新发现订单已经被别人处理，代码抛异常，事务回滚前面的占名额，骑手不会凭空多出一单。</p>
+
+  <h2>releaseOrderSlot：完成订单时安全减一</h2>
+  <pre>UPDATE rider
+SET current_order_count = current_order_count - 1
+WHERE id = ? AND current_order_count &gt; 0;</pre>
+  <p>完成订单前，项目先用 <code>completeIfDelivering</code> 确认订单确实从“配送中”变成“已完成”；随后调用释放名额。<code>current_order_count &gt; 0</code> 防止异常数据被减成负数。释放影响 0 行时抛异常，事务会回滚订单完成状态，避免出现“订单已完成但骑手名额没有正确释放”的半成功。</p>
+
+  <h2>disableIfIdle：停用也必须重新检查</h2>
+  <pre>UPDATE rider
+SET status = 3
+WHERE id = ?
+  AND status = 1
+  AND current_order_count = 0;</pre>
+  <p>停用请求可能先读到“空闲”，但在真正停用前派单请求刚好占走一个名额：</p>
+  <pre>停用：最初读到 current_order_count = 0
+派单：先把计数改成 1
+停用：执行 disableIfIdle，WHERE 不再成立，返回 0</pre>
+  <p>反过来，如果停用 SQL 先成功，派单的 <code>status = 1</code> 条件就不成立。两个请求谁先在数据库条件上成功，另一个就会失败，不会同时出现“已停用但又接了新单”。</p>
+
+  <h2>三个方法的共同口诀</h2>
+  <table>
+    <tr><th>方法</th><th>SET 做什么</th><th>WHERE 防什么</th></tr>
+    <tr><td><code>tryClaimForOrder</code></td><td>接单数加一</td><td>骑手可用且未满载</td></tr>
+    <tr><td><code>releaseOrderSlot</code></td><td>接单数减一</td><td>不能从零继续减</td></tr>
+    <tr><td><code>disableIfIdle</code></td><td>状态改为停用</td><td>仍可接单且当前没有进行中订单</td></tr>
+  </table>
+  <p class="rule"><strong>业务条件写进 WHERE，数值变化写进 SET，影响行数决定成功还是失败。</strong></p>
+
+  <h2>本课的边界</h2>
+  <p>数据库条件更新保护的是 MySQL 中的事实。停用成功后，Service 还会移除 Redis GEO 和详情缓存；Redis 操作失败不会把 MySQL 自动回滚，所以生产系统还需要补偿或重建索引。这里不要把“数据库原子更新”误说成“整个 MySQL + Redis 操作都是一个原子事务”。</p>
+
+  <h2>复述练习</h2>
+  <p>如果骑手当前接单数是 2，最大接单数是 3，同时来了两个订单，为什么一个 <code>tryClaimForOrder</code> 可以返回 1，而另一个返回 0？请按“谁先更新、后一个看到什么”来回答。</p>
+
+  <p>代码位置：<code>rider/mapper/RiderMapper.java</code>、<code>order/service/DeliveryOrderService.java</code>。参考：<a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-locking.html">MySQL InnoDB 锁</a>。</p>
+</body>
+</html>

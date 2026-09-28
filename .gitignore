@@ -1,0 +1,23 @@
+# IntelliJ IDEA local configuration (may contain passwords and machine paths)
+.idea/
+*.iml
+*.iws
+
+# Maven build output
+target/
+
+# Local environment and secrets; keep only the safe template
+.env
+.env.*
+!.env.example
+application-local.yml
+application-local.yaml
+
+# Logs and runtime files
+*.log
+logs/
+*.pid
+
+# macOS metadata
+.DS_Store
+**/.DS_Store

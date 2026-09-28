@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>骑手详情缓存与 Cache Aside</title><link rel="stylesheet" href="../assets/lesson.css"></head>
+<body>
+<h1>第二个实战问题：为什么要先查 Redis？</h1>
+<p>用户查看骑手 2 的详情时，如果每次都访问 MySQL，热门骑手会不断给数据库施加重复负担。我们要让 Redis 充当第一层的快速回答者。</p>
+<h2>查询流程（Cache Aside）</h2>
+<pre>请求 GET /api/v1/riders/2
+          ↓
+Redis 里有 rider:detail:2？
+  ├─有：反序列化为 Rider，直接返回
+  └─没有：查 MySQL
+                 ↓
+             查不到：抛出“骑手不存在”
+             查到：写入 Redis（TTL 10 分钟）后返回</pre>
+<h2>修改流程</h2>
+<pre>更新 MySQL 成功
+       ↓
+DEL rider:detail:2
+       ↓
+下次读取回填新缓存</pre>
+<p class="rule">为什么是“删缓存”而不是“立即更新缓存”？因为改了什么字段、要存哪个版本都会增加复杂度；先删后读的策略更简单、更常用。</p>
+<h2>下一步代码会出现的两个对象</h2>
+<ul><li><code>StringRedisTemplate</code>：负责调用 Redis。</li><li><code>ObjectMapper</code>：将 Java 的 <code>Rider</code> 对象和 JSON 字符串互相转换。</li></ul>
+<p>直接问我：“缓存未命中后到底哪个方法查 MySQL？”或者“为什么不立即更新 Redis？”。</p>
+</body></html>

@@ -1,0 +1,32 @@
+spring:
+  application:
+    name: delivery-dispatch
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3307/delivery_dispatch?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
+    username: ${DB_USERNAME:delivery_user}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6380}
+      timeout: 2s
+
+server:
+  port: 8080
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+rocketmq:
+  name-server: ${ROCKETMQ_NAME_SERVER:localhost:19876}
+  producer:
+    group: delivery-dispatch-producer
+    send-message-timeout: 3000

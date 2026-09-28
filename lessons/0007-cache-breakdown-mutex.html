@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>缓存击穿：热点 Key 与互斥锁</title><link rel="stylesheet" href="../assets/lesson.css"></head>
+<body>
+<h1>第五个实战问题：一个热点骑手详情过期</h1>
+<p>假设骑手 1 正在配送热门订单，几千个页面同时查看 <code>GET /api/v1/riders/1</code>。当 <code>rider:detail:1</code> 正好过期，几千个请求都发现 Redis 未命中，并同时查询 MySQL。这叫<strong>缓存击穿</strong>，也常叫热点 Key 失效后的 cache stampede。</p>
+<h2>它和缓存雪崩有什么不同？</h2>
+<ul><li><strong>雪崩</strong>：许多 Key 大批量失效，范围广。</li><li><strong>击穿</strong>：一个或少数热点 Key 失效，但同一 Key 的并发量极大。</li></ul>
+<h2>互斥锁的思路</h2>
+<pre>请求 A：发现 rider:detail:1 未命中 → 获得 rebuild:lock:rider:1 → 查 MySQL → 回填缓存 → 释放锁
+请求 B：发现同一 Key 未命中 → 未获得锁 → 短暂等待 → 再查 Redis
+                                      └→ A 已回填：直接返回缓存</pre>
+<p>目标不是让所有请求排队查 MySQL，而是只允许一个请求重建缓存，其他请求等它写完后读缓存。</p>
+<h2>锁为什么必须有 TTL？</h2>
+<p>如果获得锁的服务在查询中崩溃，锁若永不过期，后续所有请求都会一直拿不到锁。我们会使用 Redis 的原子命令：<code>SET lockKey token NX EX 10</code>，即“仅当锁不存在时写入，并在 10 秒后自动过期”。</p>
+<h2>本项目实现边界</h2>
+<p>本地单实例项目先学习正确的基础流程：获取锁、双重检查缓存、回填、finally 释放锁。生产多实例还必须用唯一 token 校验“锁是否仍属于自己”再删除，避免误删其他实例的锁；后续会补这一层。</p>
+<p>Redis 官方 Cache Aside 文档也指出，热门 Key 过期后大量进程可能同时回源，形成 stampede。<a href="https://redis.io/docs/latest/develop/use-cases/cache-aside/">Redis 官方 Cache Aside</a></p>
+</body></html>

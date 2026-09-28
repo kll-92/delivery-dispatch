@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>MySQL 条件更新：并发时的最后一道闸门</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+  <h1>第十课：为什么“先查再改”不够安全</h1>
+  <p>本课只解决一个问题：两个请求同时操作同一条订单时，怎样让数据库只接受仍然符合业务条件的那个请求。</p>
+
+  <h2>先看生活场景：订单取消和派单撞在一起</h2>
+  <p>张三刚下单，数据库里状态是“待派单”。后台派单和用户取消几乎同时开始：</p>
+  <pre>派单请求 A：查到“待派单”
+取消请求 B：也查到“待派单”
+A：把订单改成“已派单”，骑手张三接到订单
+B：用刚才读到的旧对象，把订单改成“已取消”</pre>
+  <p>如果 B 最后无条件保存整条旧订单，数据库可能显示“已取消”，但 A 已经把骑手名额加一；订单和骑手就对不上了。根因不是“数据库没有锁”，而是 Java 里的检查结果可能在真正写入前就过期。</p>
+
+  <h2>关键想法：把“检查条件”和“修改”放进同一条 SQL</h2>
+  <p>不要只在 Java 里说“我刚刚查到它待派单”；让数据库在真正写入的那一刻再次确认状态：</p>
+  <pre>UPDATE delivery_order
+SET status = 4
+WHERE id = 42 AND status = 0;</pre>
+  <p>这句话的白话是：“只有 42 号订单此刻仍是待派单（0），我才把它改成已取消（4）。”MySQL/InnoDB 对同一行的并发更新会协调执行；后来的请求要根据数据库当时那行的状态决定是否还能匹配。</p>
+
+  <h2>这条 SQL 的返回值为什么重要？</h2>
+  <table>
+    <tr><th>Mapper 返回 int</th><th>含义</th><th>业务处理</th></tr>
+    <tr><td>1</td><td>有一行满足 WHERE 并被修改</td><td>这次状态转换成功</td></tr>
+    <tr><td>0</td><td>没有行满足条件（订单不存在，或状态已被别人改变）</td><td>拒绝用旧状态覆盖新状态，提示刷新</td></tr>
+  </table>
+  <p>本项目检查 <code>cancelIfPending(...)</code>、<code>startIfAssigned(...)</code>、<code>completeIfDelivering(...)</code> 的返回值；它们分别要求订单仍处于“待派单”“已派单”“配送中”。</p>
+
+  <h2>代码分别放在哪里？</h2>
+  <p><code>DeliveryOrderMapper</code> 定义 SQL，负责“数据库要执行什么”；<code>DeliveryOrderService</code> 负责校验、调用 Mapper，并解释影响行数为 0 时要给业务什么结果。比如：</p>
+  <pre>// Mapper：只有待派单订单才可取消
+UPDATE delivery_order
+SET status = #{canceledStatus}
+WHERE id = #{orderId} AND status = #{pendingStatus}
+
+// Service：没更新到行，说明刚才读取的状态已经过期
+int canceled = deliveryOrderMapper.cancelIfPending(...);
+if (canceled == 0) {
+    throw new IllegalArgumentException("订单状态已变化，请刷新后重试");
+}</pre>
+  <p>前面的 Java 状态检查仍有价值：它能快速给出“当前状态本来就不允许取消”的提示。但它只是友好的前置检查，Mapper 里的条件 UPDATE 才是并发下的最终判定。</p>
+
+  <h2>它和 Java 锁、事务分别是什么关系？</h2>
+  <ul>
+    <li>它不是 Java 的 <code>synchronized</code>：保护由数据库执行，不依赖请求是否落在同一个 JVM，因此多个应用实例也能协调同一行。</li>
+    <li>它不是 <code>@Transactional</code> 的替代品：单行状态能用条件更新争胜负；派单还要“占骑手名额 + 绑定订单”两步一起成功，所以仍需要事务把两步放进同一个 MySQL 提交/回滚范围。</li>
+    <li>它不等于所有并发问题都解决了：其他表、其他业务规则仍要设计合适的约束、条件更新或事务。</li>
+  </ul>
+
+  <h2>本项目要记住的口令</h2>
+  <p class="rule"><strong>先查给人看，条件 UPDATE 给并发兜底。</strong>例如骑手接单不能只“先查当前单数小于 3，再加一”，而是让 SQL 同时执行 <code>current_order_count = current_order_count + 1</code> 和 <code>current_order_count &lt; 3</code>；只有更新行数为 1 才拿到名额。</p>
+
+  <h2>面试时可以这样说</h2>
+  <blockquote>仅靠先查询再更新会产生竞态，因为查询后到写入前状态可能被别的请求改变。我把允许的旧状态写进 UPDATE 的 WHERE 条件，由 MySQL 对同一行的并发更新进行协调，并根据影响行数判断本次状态转换是否成功。多行派单操作再用事务保证一起提交或回滚。</blockquote>
+
+  <h2>轮到你复述</h2>
+  <p>假设取消请求先查到“待派单”，但派单请求抢先把订单改成“已派单”。这时 <code>cancelIfPending</code> 为什么会返回 0？请用自己的话回答，不用背术语。下一课再拆“骑手名额为什么要在 SQL 里加一，以及 disable 为什么也要带条件”。</p>
+
+  <p>下一课：<a href="0011-two-kinds-of-update-protection.html">条件更新与指定字段更新的区别</a>。延伸阅读：MySQL 官方文档的<a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-locking-reads.html">锁定读</a>与 <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-locking.html">InnoDB 锁</a>。当前项目代码：<code>order/mapper/DeliveryOrderMapper.java</code> 和 <code>order/service/DeliveryOrderService.java</code>。</p>
+</body>
+</html>

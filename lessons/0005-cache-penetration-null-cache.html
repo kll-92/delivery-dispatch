@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>缓存穿透：不存在的数据怎么办？</title><link rel="stylesheet" href="../assets/lesson.css"></head>
+<body>
+<h1>第三个实战问题：查不存在的骑手会怎样？</h1>
+<p>假设有人反复请求 <code>GET /api/v1/riders/999999</code>。这个 ID 在 Redis 没有，在 MySQL 也没有。若每次都直接抛“骑手不存在”，每一个请求都会穿过 Redis 打到 MySQL。</p>
+<h2>这叫缓存穿透</h2>
+<pre>请求不存在的 id
+  ↓
+Redis 未命中
+  ↓
+MySQL 也查不到
+  ↓
+直接返回异常（没有留下任何缓存）
+  ↓
+下一次相同请求，重复访问 MySQL</pre>
+<p class="rule">缓存穿透不是“Redis 被穿透了”，而是缓存挡不住无效请求，数据库成了每次请求的终点。</p>
+<h2>本项目的第一层解法：空值缓存</h2>
+<pre>Redis 未命中
+  ↓
+MySQL 查不到 rider
+  ↓
+Redis SET rider:detail:999999 "" EX 60
+  ↓
+返回“骑手不存在”
+
+下一次相同请求
+  ↓
+Redis GET 得到空字符串
+  ↓
+直接返回“骑手不存在”，不查 MySQL</pre>
+<h2>两个容易混淆的“空”</h2>
+<ul>
+  <li><code>null</code>：Redis 没有这个 Key，即真正的缓存未命中。</li>
+  <li><code>""</code>：Redis 有这个 Key，但值是我们专门写进去的“数据库不存在”标记。</li>
+</ul>
+<p>因此，代码不能再只用 <code>StringUtils.hasText(cacheJson)</code> 判断。它会把 <code>""</code> 与 <code>null</code> 都当成“没有有效文本”，从而又查一次 MySQL。</p>
+<h2>为什么空值 TTL 要短？</h2>
+<p>若管理员随后真的创建了 id=999999 的骑手，空缓存不能长时间挡住新数据。因此本项目让空值只缓存 60 秒；正常骑手详情仍缓存 10 分钟。</p>
+<h2>与布隆过滤器的关系</h2>
+<p>空值缓存适合当前项目：改动小、能保护重复的无效请求。布隆过滤器适合海量、随机且恶意的 ID 攻击，但有误判概率，下一阶段再学。</p>
+<p>官方 Cache Aside 文档说明：缓存未命中会回源主库并回填，TTL 用于限制缓存数据的存活时间；空值缓存正是针对“不存在记录反复回源”的补充策略。<a href="https://redis.io/docs/latest/develop/use-cases/cache-aside/">Redis 官方 Cache Aside</a></p>
+<p>这一课的动手目标：让 <code>GET /api/v1/riders/999999</code> 第一次查询 MySQL 后写入 60 秒空值；第二次请求不再查询 MySQL。</p>
+</body></html>

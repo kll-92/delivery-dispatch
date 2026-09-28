@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>Redis：Key、String 与 TTL</title><link rel="stylesheet" href="../assets/lesson.css"></head>
+<body>
+<h1>Redis 第一项实操：Key、String 与 TTL</h1>
+<p>目标：亲手把“骑手 2 的临时缓存”写入 Redis，读出来，再确认它会自动过期。</p>
+
+<h2>先理解三个词</h2>
+<table><tr><th>词</th><th>可以把它想成</th><th>项目例子</th></tr>
+<tr><td>Key</td><td>储物柜编号</td><td><code>rider:detail:2</code></td></tr>
+<tr><td>Value</td><td>柜子里的物品</td><td>骑手 2 的详情 JSON</td></tr>
+<tr><td>TTL</td><td>柜子自动清空前的倒计时</td><td>10 分钟后自动失效</td></tr></table>
+
+<h2>在终端执行</h2>
+<pre>docker exec -it delivery-redis redis-cli
+
+SET rider:detail:2 '{"id":2,"name":"李四"}'
+GET rider:detail:2
+EXPIRE rider:detail:2 60
+TTL rider:detail:2
+DEL rider:detail:2</pre>
+<p><code>SET</code> 写入，<code>GET</code> 读取，<code>EXPIRE</code> 设定 60 秒过期，<code>TTL</code> 看剩余秒数，<code>DEL</code> 删除。</p>
+
+<h2>为什么缓存必须有 TTL？</h2>
+<p class="rule">如果骑手详情永不过期，而数据库中的姓名、手机号已更新，Redis 仍可能返回旧数据；同时无用 Key 会不断积累并占用内存。TTL 让缓存自动失效，下一次查询再从 MySQL 取新数据。</p>
+
+<h2>复习自测</h2>
+<ol><li>如果 Redis 没有 <code>rider:detail:2</code>，这叫缓存命中还是未命中？</li><li>为什么骑手详情 Key 不直接写成 <code>2</code>？</li><li>正式订单是否应该只存 Redis？为什么？</li></ol>
+<p>完成后把你的三个答案和终端结果发给我。我会检查理解，再带你把它接进 Spring Boot。主资料：<a href="https://redis.io/docs/latest/develop/data-types/strings/">Redis 官方 String 文档</a>。</p>
+</body></html>
