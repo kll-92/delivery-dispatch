@@ -6,6 +6,11 @@
 # Maven build output
 target/
 
+# Frontend dependencies and build output
+node_modules/
+frontend/dist/
+npm-debug.log*
+
 # Local environment and secrets; keep only the safe template
 .env
 .env.*
