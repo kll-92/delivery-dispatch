@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { orderApi, riderApi } from './api'
 import { demoOrders, demoRiders } from './mockData'
 import type { DeliveryOrder, OrderStatus, Rider } from './types'
@@ -77,6 +77,7 @@ function App() {
   const [notice, setNotice] = useState('')
   const [busyOrderId, setBusyOrderId] = useState<number | null>(null)
   const [assignment, setAssignment] = useState<Record<number, string>>({})
+  const hasLoadedData = useRef(false)
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -86,11 +87,18 @@ function App() {
       setRiders(nextRiders)
       setOrders(nextOrders)
       setSource('api')
+      hasLoadedData.current = true
     } catch (requestError) {
-      setRiders(demoRiders)
-      setOrders(demoOrders)
-      setSource('demo')
-      setError(requestError instanceof Error ? requestError.message : '后端暂不可用')
+      const message = requestError instanceof Error ? requestError.message : '后端暂不可用'
+      if (!hasLoadedData.current) {
+        setRiders(demoRiders)
+        setOrders(demoOrders)
+        setSource('demo')
+        hasLoadedData.current = true
+        setError(message)
+      } else {
+        setError(`刷新失败，保留当前数据：${message}`)
+      }
     } finally {
       setLoading(false)
     }
@@ -113,7 +121,7 @@ function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  })
+  }, [variant])
 
   function switchVariant(next: Variant) {
     setVariant(next)
@@ -141,11 +149,16 @@ function App() {
       replaceOrder(await action())
       setNotice('操作成功，订单状态已刷新')
     } catch (actionError) {
-      updateDemoOrder(orderId, fallback)
-      setSource('demo')
-      setNotice(actionError instanceof Error
-        ? `${actionError.message} · 当前已切换为演示模式`
-        : '后端暂不可用，当前已切换为演示模式')
+      if (source === 'demo') {
+        updateDemoOrder(orderId, fallback)
+        setNotice(actionError instanceof Error
+          ? `${actionError.message} · 已在演示数据中完成操作`
+          : '后端暂不可用，已在演示数据中完成操作')
+      } else {
+        setNotice(actionError instanceof Error
+          ? `${actionError.message} · 未修改页面数据，请稍后重试`
+          : '后端暂不可用，未修改页面数据，请稍后重试')
+      }
     } finally {
       setBusyOrderId(null)
     }

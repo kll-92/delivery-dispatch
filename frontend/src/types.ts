@@ -15,6 +15,14 @@ export interface Rider {
   updatedAt?: string | null
 }
 
+export interface NearbyRider {
+  riderId: number
+  riderNo: string
+  name: string
+  distanceKm: number
+  currentOrderCount: number
+}
+
 export interface DeliveryOrder {
   id: number
   orderNo: string

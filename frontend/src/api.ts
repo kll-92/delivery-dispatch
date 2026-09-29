@@ -1,4 +1,4 @@
-import type { DeliveryOrder, Rider } from './types'
+import type { DeliveryOrder, NearbyRider, Rider } from './types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api/v1'
 
@@ -25,7 +25,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const riderApi = {
   list: () => request<Rider[]>('/riders'),
   nearby: (longitude: number, latitude: number, radiusKm = 5, limit = 20) =>
-    request<Rider[]>(`/riders/nearby?longitude=${longitude}&latitude=${latitude}&radiusKm=${radiusKm}&limit=${limit}`),
+    request<NearbyRider[]>(`/riders/nearby?longitude=${longitude}&latitude=${latitude}&radiusKm=${radiusKm}&limit=${limit}`),
 }
 
 export const orderApi = {
