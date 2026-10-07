@@ -2,12 +2,41 @@ package com.kll.deliverydispatch.order.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.kll.deliverydispatch.order.entity.DeliveryOrder;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 @Mapper
 public interface DeliveryOrderMapper extends BaseMapper<DeliveryOrder> {
+
+    /** Delete only the version that was read. MySQL <=> also matches a null rider_id. */
+    @Delete("""
+            DELETE FROM delivery_order
+            WHERE id = #{orderId} AND status = #{expectedStatus}
+              AND rider_id <=> #{expectedRiderId}
+            """)
+    int deleteIfUnchanged(@Param("orderId") Long orderId,
+                          @Param("expectedStatus") int expectedStatus,
+                          @Param("expectedRiderId") Long expectedRiderId);
+
+    /** Old pending orders whose Outbox event reached RocketMQ may need a later retry. */
+    @Select("""
+            SELECT o.id
+            FROM delivery_order o
+            WHERE o.status = 0
+              AND o.created_at < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 30 SECOND)
+              AND o.id > #{afterId}
+              AND EXISTS (
+                  SELECT 1 FROM dispatch_outbox x
+                  WHERE x.order_id = o.id AND x.status = 1
+              )
+            ORDER BY o.id ASC
+            LIMIT #{limit}
+            """)
+    java.util.List<Long> selectPendingPublishedIdsAfter(@Param("afterId") long afterId,
+                                                         @Param("limit") int limit);
 
     /**
      * 只有待派单订单才允许变更为已派单，防止同一订单被重复分配。

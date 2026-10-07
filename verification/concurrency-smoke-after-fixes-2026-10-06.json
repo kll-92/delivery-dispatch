@@ -1,0 +1,138 @@
+{
+  "ran_at": "2026-10-06T20:15:20+08:00",
+  "base_url": "http://localhost:8081",
+  "application_health": "UP",
+  "read_scenario": {
+    "endpoint": "GET /api/v1/riders/2",
+    "note": "Rider detail cache warmed before timed requests.",
+    "requests": 1000,
+    "successful_2xx": 1000,
+    "status_counts": {
+      "200": 1000
+    },
+    "wall_seconds": 0.584,
+    "throughput_rps": 1712.5,
+    "latency_ms": {
+      "p50": 21.99,
+      "p95": 56.6,
+      "p99": 86.57,
+      "max": 120.26
+    },
+    "errors": []
+  },
+  "geo_scenario": {
+    "endpoint": "GET /api/v1/riders/nearby?longitude=116.3169&latitude=39.9904&radiusKm=5&limit=20",
+    "note": "Redis GEO search centered on the selected rider location.",
+    "requests": 500,
+    "successful_2xx": 500,
+    "status_counts": {
+      "200": 500
+    },
+    "wall_seconds": 0.444,
+    "throughput_rps": 1126.9,
+    "latency_ms": {
+      "p50": 46.54,
+      "p95": 61.84,
+      "p99": 66.72,
+      "max": 77.67
+    },
+    "errors": []
+  },
+  "capacity_race": {
+    "rider_id": 2,
+    "concurrent_assign_requests": 100,
+    "assignment_workers": 100,
+    "assignment_wall_seconds": 0.259,
+    "assignment_attempts_per_second": 385.6,
+    "assignment_http_metrics": {
+      "requests": 100,
+      "successful_2xx": 3,
+      "status_counts": {
+        "200": 3,
+        "400": 97
+      },
+      "wall_seconds": 0.259,
+      "throughput_rps": 385.6,
+      "latency_ms": {
+        "p50": 159.23,
+        "p95": 237.42,
+        "p99": 246.16,
+        "max": 247.2
+      },
+      "errors": []
+    },
+    "assigned": 3,
+    "capacity_rejected_http_400": 97,
+    "unexpected_statuses": {},
+    "rider_count_before": 0,
+    "rider_count_during_after_requests": 3,
+    "capacity_invariant_holds": true,
+    "cleanup": {
+      "orders_deleted": 100,
+      "orders_already_absent": 0,
+      "remaining_order_ids": [],
+      "cleanup_errors": []
+    }
+  },
+  "delete_vs_assign_race": {
+    "rounds_requested": 30,
+    "rounds_completed": 30,
+    "status_counts": {
+      "assign_400": 30,
+      "delete_204": 30
+    },
+    "rider_counts_after_each_cleanup": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "cleanup_errors": [],
+    "no_capacity_leak": true
+  },
+  "async_dispatch_and_fulfillment": {
+    "order_id": 338,
+    "rider_id": 2,
+    "outbox_to_assigned_ms": 4190.1,
+    "order_status_path": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "rider_count_after_complete": 0,
+    "capacity_released": true,
+    "cleanup": {
+      "orders_deleted": 1,
+      "orders_already_absent": 0,
+      "remaining_order_ids": [],
+      "cleanup_errors": []
+    }
+  }
+}

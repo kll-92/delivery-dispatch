@@ -2,18 +2,31 @@ spring:
   application:
     name: delivery-dispatch
   datasource:
-    url: ${DB_URL:jdbc:mysql://localhost:3307/delivery_dispatch?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
+    url: ${DB_URL:jdbc:mysql://localhost:3307/delivery_dispatch?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC}
     username: ${DB_USERNAME:delivery_user}
     password: ${DB_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      # DATETIME 字段统一按 UTC 保存；前端负责转换成浏览器本地时间。
+      connection-init-sql: "SET time_zone = '+00:00'"
   data:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6380}
       timeout: 2s
+  task:
+    scheduling:
+      pool:
+        size: 2
 
 server:
   port: 8080
+  servlet:
+    session:
+      timeout: 30m
+      cookie:
+        http-only: true
+        same-site: lax
 
 springdoc:
   swagger-ui:
@@ -30,3 +43,8 @@ rocketmq:
   producer:
     group: delivery-dispatch-producer
     send-message-timeout: 3000
+
+dispatch:
+  pending-recovery:
+    enabled: ${DISPATCH_PENDING_RECOVERY_ENABLED:true}
+    delay-ms: ${DISPATCH_PENDING_RECOVERY_DELAY_MS:30000}

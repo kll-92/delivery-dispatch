@@ -3,7 +3,11 @@ package com.kll.deliverydispatch.rider.controller;
 import com.kll.deliverydispatch.rider.entity.Rider;
 import com.kll.deliverydispatch.rider.dto.NearbyRiderResponse;
 import com.kll.deliverydispatch.rider.dto.RiderLocationRequest;
+import com.kll.deliverydispatch.rider.dto.CreateRiderRequest;
+import com.kll.deliverydispatch.rider.dto.UpdateRiderRequest;
 import com.kll.deliverydispatch.rider.service.RiderService;
+import com.kll.deliverydispatch.common.dto.PageResult;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -17,8 +21,8 @@ public class RiderController {
     private final RiderService riderService;
 
     @PostMapping
-    public Rider create(@RequestBody Rider rider){
-        return riderService.create(rider);
+    public Rider create(@Valid @RequestBody CreateRiderRequest request){
+        return riderService.create(request.toEntity());
     }
 
     @GetMapping("/{id}")
@@ -31,9 +35,18 @@ public class RiderController {
         return riderService.list();
     }
 
+    @GetMapping("/page")
+    public PageResult<Rider> page(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) Integer status,
+            @RequestParam(required = false) String keyword) {
+        return riderService.page(status, keyword, page, size);
+    }
+
     @PutMapping("/{id}")
-    public Rider update(@PathVariable Long id,@RequestBody Rider request){
-        return riderService.update(id,request);
+    public Rider update(@PathVariable Long id,@Valid @RequestBody UpdateRiderRequest request){
+        return riderService.update(id,request.toEntity());
     }
 
     @PatchMapping("/{id}/disable")
@@ -41,8 +54,13 @@ public class RiderController {
         return riderService.disable(id);
     }
 
+    @PatchMapping("/{id}/enable")
+    public Rider enable(@PathVariable Long id) {
+        return riderService.enable(id);
+    }
+
     @PutMapping("/{id}/location")
-    public Rider updateLocation(@PathVariable Long id, @RequestBody RiderLocationRequest request) {
+    public Rider updateLocation(@PathVariable Long id, @Valid @RequestBody RiderLocationRequest request) {
         return riderService.updateLocation(id, request);
     }
 

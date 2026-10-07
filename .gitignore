@@ -11,6 +11,10 @@ node_modules/
 frontend/dist/
 npm-debug.log*
 
+# Python verification-script cache
+__pycache__/
+*.py[cod]
+
 # Local environment and secrets; keep only the safe template
 .env
 .env.*
