@@ -11,6 +11,7 @@ import org.apache.rocketmq.client.producer.SendStatus;
 import org.apache.rocketmq.spring.core.RocketMQTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
@@ -20,6 +21,7 @@ import java.util.List;
  * 定时把 MySQL Outbox 中尚未发布的事件发送到 RocketMQ。
  */
 @Component
+@ConditionalOnProperty(prefix = "dispatch.messaging", name = "enabled", havingValue = "true", matchIfMissing = true)
 @RequiredArgsConstructor
 @Slf4j
 public class DispatchOutboxPublisher {

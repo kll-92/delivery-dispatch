@@ -1,6 +1,0 @@
-:root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-body { max-width: 860px; margin: 48px auto; padding: 0 24px; color: #172033; line-height: 1.65; }
-h1 { color: #123b72; } h2 { margin-top: 30px; color: #175e54; }
-code, pre { background: #f2f5f8; border-radius: 6px; } code { padding: 2px 5px; }
-pre { padding: 14px; overflow-x: auto; } .rule { border-left: 4px solid #22a06b; padding: 10px 16px; background: #f1fbf6; }
-table { border-collapse: collapse; width: 100%; } th, td { border: 1px solid #d7dee8; padding: 9px; text-align: left; }

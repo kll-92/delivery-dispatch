@@ -18,14 +18,10 @@ public class RedisLockService {
     private final StringRedisTemplate stringRedisTemplate;
     private static final Logger log = LoggerFactory.getLogger(RedisLockService.class);
     public boolean tryLock(String lockKey, String lockToken) {
-        try {
-            Boolean locked = stringRedisTemplate.opsForValue()
-                    .setIfAbsent(lockKey, lockToken, 10, TimeUnit.SECONDS);
-            return Boolean.TRUE.equals(locked);
-        } catch (DataAccessException e) {
-            log.warn("Redis 获取缓存重建锁失败，lockKey={}", lockKey, e);
-            return false;
-        }
+        // Let callers distinguish Redis failure from an ordinary lock contender.
+        Boolean locked = stringRedisTemplate.opsForValue()
+                .setIfAbsent(lockKey, lockToken, 10, TimeUnit.SECONDS);
+        return Boolean.TRUE.equals(locked);
     }
     public void unlock(String lockKey, String lockToken) {
         String script = """

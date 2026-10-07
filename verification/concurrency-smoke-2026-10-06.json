@@ -1,0 +1,92 @@
+{
+  "ran_at": "2026-10-06T16:47:11+08:00",
+  "base_url": "http://localhost:8080",
+  "application_health": "UP",
+  "read_scenario": {
+    "endpoint": "GET /api/v1/riders/2",
+    "note": "Rider detail cache warmed before timed requests.",
+    "requests": 1000,
+    "successful_2xx": 1000,
+    "status_counts": {
+      "200": 1000
+    },
+    "wall_seconds": 0.211,
+    "throughput_rps": 4729.4,
+    "latency_ms": {
+      "p50": 9.68,
+      "p95": 36.1,
+      "p99": 41.45,
+      "max": 43.34
+    },
+    "errors": []
+  },
+  "geo_scenario": {
+    "endpoint": "GET /api/v1/riders/nearby?longitude=116.3169&latitude=39.9904&radiusKm=5&limit=20",
+    "note": "Redis GEO search centered on the selected rider location.",
+    "requests": 500,
+    "successful_2xx": 500,
+    "status_counts": {
+      "200": 500
+    },
+    "wall_seconds": 0.217,
+    "throughput_rps": 2303.1,
+    "latency_ms": {
+      "p50": 23.1,
+      "p95": 45.21,
+      "p99": 65.0,
+      "max": 90.42
+    },
+    "errors": []
+  },
+  "capacity_race": {
+    "rider_id": 2,
+    "concurrent_assign_requests": 100,
+    "assignment_workers": 100,
+    "assignment_wall_seconds": 0.128,
+    "assignment_attempts_per_second": 783.0,
+    "assignment_http_metrics": {
+      "requests": 100,
+      "successful_2xx": 3,
+      "status_counts": {
+        "200": 3,
+        "400": 97
+      },
+      "wall_seconds": 0.128,
+      "throughput_rps": 783.0,
+      "latency_ms": {
+        "p50": 76.66,
+        "p95": 114.58,
+        "p99": 117.43,
+        "max": 118.72
+      },
+      "errors": []
+    },
+    "assigned": 3,
+    "capacity_rejected_http_400": 97,
+    "unexpected_statuses": {},
+    "rider_count_before": 0,
+    "rider_count_during_after_requests": 3,
+    "capacity_invariant_holds": true,
+    "cleanup": {
+      "orders_deleted": 100,
+      "cleanup_errors": []
+    }
+  },
+  "async_dispatch_and_fulfillment": {
+    "order_id": 206,
+    "rider_id": 2,
+    "outbox_to_assigned_ms": 1043.8,
+    "order_status_path": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "rider_count_after_complete": 0,
+    "capacity_released": true,
+    "cleanup": {
+      "orders_deleted": 1,
+      "cleanup_errors": []
+    }
+  }
+}

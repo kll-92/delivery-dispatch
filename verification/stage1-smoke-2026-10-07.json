@@ -1,0 +1,36 @@
+{
+  "database": "delivery_dispatch_verify_20261007_stage1",
+  "baseUrl": "http://localhost:18081",
+  "startedAt": "2026-10-07T07:26:31.403953+00:00",
+  "passed": [
+    "anonymous_business_get_401",
+    "admin_session_and_database_identity",
+    "account_create_safe_dto",
+    "dispatcher_read_page_allowed",
+    "missing_and_invalid_csrf_rejected",
+    "malformed_input_coordinate_fee_and_page_validation",
+    "order_create_ignores_server_managed_fields",
+    "fee_update_rejects_more_than_two_decimal_places",
+    "order_pagination_filters_state_and_order_no",
+    "dispatcher_admin_routes_and_logs_forbidden",
+    "admin_rider_create_location_disable_enable",
+    "manual_assign_start_complete_capacity_0_1_0",
+    "completed_order_delete_audit_actor_reason_before_snapshot",
+    "pending_assigned_delivering_canceled_fee_update_and_delete_capacity_audit",
+    "disabled_account_revokes_existing_session",
+    "audit_failure_returns_500",
+    "audit_failure_rolls_back_order_and_outbox",
+    "global_dashboard_summary_and_iso_datetime_filter"
+  ],
+  "fixtures": {
+    "adminAccountId": 1,
+    "dispatcherAccountId": 4,
+    "orderId": 9,
+    "riderId": 2,
+    "deletedOrderId": 9,
+    "rollbackReferenceOrderId": 14
+  },
+  "elapsedSeconds": 5.641,
+  "finishedAt": "2026-10-07T07:26:36.720712+00:00",
+  "result": "passed"
+}

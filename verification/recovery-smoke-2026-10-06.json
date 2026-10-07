@@ -1,0 +1,19 @@
+{
+  "ran_at": "2026-10-06T20:18:04+08:00",
+  "base_url": "http://localhost:8081",
+  "order_id": 339,
+  "rider_id": 3,
+  "no_rider_retry_observed_after_seconds": 10.25,
+  "assignment_after_rider_online_seconds": 30.17,
+  "order_status_path": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "rider_count_after_complete": 0,
+  "no_rider_metric_before": 0.0,
+  "no_rider_metric_after": 1.0,
+  "processed_metric_after": 1.0,
+  "cleanup_errors": []
+}

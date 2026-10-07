@@ -1,0 +1,22 @@
+{
+  "ran_at": "2026-10-06T20:36:53+08:00",
+  "base_url": "http://localhost:8082",
+  "redis_port": 6399,
+  "redis_state": "unreachable",
+  "scenario": {
+    "requests": 100,
+    "successful_2xx": 100,
+    "status_counts": {
+      "200": 100
+    },
+    "wall_seconds": 0.158,
+    "throughput_rps": 633.5,
+    "latency_ms": {
+      "p50": 27.58,
+      "p95": 33.26,
+      "p99": 47.91,
+      "max": 52.15
+    },
+    "errors": []
+  }
+}

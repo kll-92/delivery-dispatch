@@ -45,4 +45,16 @@ public interface RiderMapper extends BaseMapper<Rider> {
     int disableIfIdle(@Param("riderId") Long riderId,
                       @Param("availableStatus") int availableStatus,
                       @Param("disabledStatus") int disabledStatus);
+
+    /** Re-enable only an idle disabled rider; never overwrite a concurrent order count. */
+    @Update("""
+            UPDATE rider
+            SET status = #{availableStatus}
+            WHERE id = #{riderId}
+              AND status = #{disabledStatus}
+              AND current_order_count = 0
+            """)
+    int enableIfIdle(@Param("riderId") Long riderId,
+                     @Param("disabledStatus") int disabledStatus,
+                     @Param("availableStatus") int availableStatus);
 }

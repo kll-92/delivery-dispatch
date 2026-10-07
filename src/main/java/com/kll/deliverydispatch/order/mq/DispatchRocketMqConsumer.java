@@ -9,11 +9,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.rocketmq.spring.annotation.RocketMQMessageListener;
 import org.apache.rocketmq.spring.core.RocketMQListener;
 import org.springframework.stereotype.Component;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
 /**
  * 正常返回表示消费成功；抛出异常时 RocketMQ 按消费组配置重试，超过上限后进入死信队列。
  */
 @Component
+@ConditionalOnProperty(prefix = "dispatch.messaging", name = "enabled", havingValue = "true", matchIfMissing = true)
 @RequiredArgsConstructor
 @Slf4j
 @RocketMQMessageListener(
