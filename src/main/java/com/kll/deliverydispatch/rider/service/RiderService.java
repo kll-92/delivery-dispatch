@@ -6,11 +6,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kll.deliverydispatch.common.cache.RedisLockService;
 import com.kll.deliverydispatch.common.audit.OperationLogService;
 import com.kll.deliverydispatch.common.dto.PageResult;
-import com.kll.deliverydispatch.rider.RiderCapacity;
 import com.kll.deliverydispatch.rider.dto.NearbyRiderResponse;
 import com.kll.deliverydispatch.rider.dto.RiderLocationRequest;
 import com.kll.deliverydispatch.rider.entity.Rider;
 import com.kll.deliverydispatch.rider.enums.RiderStatus;
+import com.kll.deliverydispatch.rider.geo.RiderGeoSyncScheduler;
+import com.kll.deliverydispatch.rider.location.RiderLocationPolicy;
 import com.kll.deliverydispatch.rider.mapper.RiderMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataAccessException;
@@ -18,7 +19,6 @@ import org.springframework.data.geo.Distance;
 import org.springframework.data.geo.GeoResult;
 import org.springframework.data.geo.GeoResults;
 import org.springframework.data.geo.Metrics;
-import org.springframework.data.geo.Point;
 import org.springframework.data.redis.connection.RedisGeoCommands;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.domain.geo.GeoReference;
@@ -36,6 +36,7 @@ import java.util.Map;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Set;
+import java.time.LocalDateTime;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.ThreadLocalRandom;
@@ -55,6 +56,8 @@ public class RiderService {
     private final StringRedisTemplate stringRedisTemplate;
     private final ObjectMapper objectMapper;
     private final OperationLogService operationLogService;
+    private final RiderLocationPolicy riderLocationPolicy;
+    private final RiderGeoSyncScheduler riderGeoSyncScheduler;
     //记录日志
     private static final Logger log = LoggerFactory.getLogger(RiderService.class);
 
@@ -67,6 +70,7 @@ public class RiderService {
         rider.setCurrentOrderCount(null);
         rider.setCreatedAt(null);
         rider.setUpdatedAt(null);
+        rider.setLastLocationAt(null);
         if(!StringUtils.hasText(rider.getRiderNo())){
             throw new IllegalArgumentException("骑手编号不能为空");
         }
@@ -78,6 +82,9 @@ public class RiderService {
         }
         validateRiderFieldLengths(rider);
         validateOptionalCoordinates(rider.getLongitude(), rider.getLatitude());
+        if (riderLocationPolicy.hasValidCoordinates(rider)) {
+            rider.setLastLocationAt(riderMapper.selectUtcNow());
+        }
 
         Long riderNoCount= riderMapper.selectCount(
                 Wrappers.<Rider>lambdaQuery()
@@ -97,7 +104,7 @@ public class RiderService {
         riderMapper.insert(rider);
         Rider after = copyRider(rider);
         operationLogService.record("CREATE", "RIDER", rider.getId(), null, after, null);
-        afterCommit(() -> syncRiderLocationToGeo(after));
+        afterCommit(() -> riderGeoSyncScheduler.schedule(after.getId()));
         evictDetailCache(rider.getId());
         return rider;
     }
@@ -237,6 +244,11 @@ public class RiderService {
         deleteRiderCache(cacheKey);
     }
 
+    /** Refresh the dispatch GEO index from committed database state, never from a stale snapshot. */
+    public void synchronizeDispatchIndexAfterCommit(Long riderId) {
+        afterCommit(() -> riderGeoSyncScheduler.schedule(riderId));
+    }
+
     public List<Rider>list(){
         return riderMapper.selectList(Wrappers.<Rider>lambdaQuery()
                 .orderByDesc(Rider::getId).last("LIMIT 200"));
@@ -289,19 +301,12 @@ public class RiderService {
         if(num>0){
             throw new IllegalArgumentException("手机号已存在");
         }
-        var update = Wrappers.<Rider>lambdaUpdate()
-                .eq(Rider::getId, id)
-                .set(Rider::getName, request.getName())
-                .set(Rider::getPhone, request.getPhone());
-        if (request.getLatitude() != null && request.getLongitude() != null) {
-            update.set(Rider::getLatitude, request.getLatitude());
-            update.set(Rider::getLongitude, request.getLongitude());
-        }
-        riderMapper.update(null, update);
+        riderMapper.updateProfile(id, request.getName(), request.getPhone(),
+                request.getLongitude(), request.getLatitude());
         Rider updatedRider = getByIdFromDatabase(id);
         Rider after = copyRider(updatedRider);
         operationLogService.record("UPDATE", "RIDER", id, before, after, null);
-        afterCommit(() -> syncRiderLocationToGeo(after));
+        afterCommit(() -> riderGeoSyncScheduler.schedule(id));
         evictDetailCache(id);
         return updatedRider;
     }
@@ -331,7 +336,7 @@ public class RiderService {
         }
         rider.setStatus(RiderStatus.DISABLED.getCode());
         operationLogService.record("DISABLE", "RIDER", id, before, copyRider(rider), null);
-        afterCommit(() -> removeRiderFromGeo(id));
+        afterCommit(() -> riderGeoSyncScheduler.schedule(id));
         evictDetailCache(id);
         return rider;
     }
@@ -361,7 +366,7 @@ public class RiderService {
         rider.setStatus(RiderStatus.AVAILABLE.getCode());
         Rider after = copyRider(rider);
         operationLogService.record("ENABLE", "RIDER", id, before, after, null);
-        afterCommit(() -> syncRiderLocationToGeo(after));
+        afterCommit(() -> riderGeoSyncScheduler.schedule(id));
         evictDetailCache(id);
         return rider;
     }
@@ -375,14 +380,11 @@ public class RiderService {
         validatePersistedCoordinates(request.longitude(), request.latitude());
         Rider before = getByIdFromDatabase(id);
         Rider beforeSnapshot = copyRider(before);
-        riderMapper.update(null, Wrappers.<Rider>lambdaUpdate()
-                .eq(Rider::getId, id)
-                .set(Rider::getLongitude, request.longitude())
-                .set(Rider::getLatitude, request.latitude()));
+        riderMapper.updateLocation(id, request.longitude(), request.latitude());
         Rider updatedRider = getByIdFromDatabase(id);
         Rider after = copyRider(updatedRider);
         operationLogService.record("LOCATION_UPDATE", "RIDER", id, beforeSnapshot, after, null);
-        afterCommit(() -> syncRiderLocationToGeo(after));
+        afterCommit(() -> riderGeoSyncScheduler.schedule(id));
         evictDetailCache(id);
         return updatedRider;
     }
@@ -424,6 +426,7 @@ public class RiderService {
             }
             List<Long> unseenRiderIds = geoResults.getContent().stream()
                     .map(result -> riderIdFromGeoMember(result.getContent().getName()))
+                    .filter(java.util.Objects::nonNull)
                     .filter(queriedRiderIds::add)
                     .toList();
             if (!unseenRiderIds.isEmpty()) {
@@ -431,10 +434,14 @@ public class RiderService {
                         ridersById.put(rider.getId(), rider));
             }
 
+            LocalDateTime dbNow = riderMapper.selectUtcNow();
             List<NearbyRiderResponse> eligible = geoResults.getContent().stream()
-                    .map(result -> toNearbyRider(result, ridersById))
+                    .map(result -> toNearbyRider(result, ridersById, longitude, latitude, radiusKm, dbNow))
                     .filter(java.util.Objects::nonNull)
+                    .sorted(java.util.Comparator.comparingDouble(NearbyRiderCandidate::distanceKm)
+                            .thenComparing(candidate -> candidate.response().currentOrderCount()))
                     .limit(limit)
+                    .map(NearbyRiderCandidate::response)
                     .toList();
             if (eligible.size() == limit || geoResults.getContent().size() < searchCount
                     || searchCount >= Integer.MAX_VALUE / 2) {
@@ -444,51 +451,44 @@ public class RiderService {
         }
     }
 
-    private NearbyRiderResponse toNearbyRider(
-            GeoResult<RedisGeoCommands.GeoLocation<String>> geoResult, Map<Long, Rider> ridersById) {
+    private NearbyRiderCandidate toNearbyRider(
+            GeoResult<RedisGeoCommands.GeoLocation<String>> geoResult, Map<Long, Rider> ridersById,
+            BigDecimal longitude, BigDecimal latitude, double radiusKm, LocalDateTime dbNow) {
         Long riderId = riderIdFromGeoMember(geoResult.getContent().getName());
-        Rider rider = ridersById.get(riderId);
-        if (rider == null || !Integer.valueOf(RiderStatus.AVAILABLE.getCode()).equals(rider.getStatus())
-                || rider.getCurrentOrderCount() == null
-                || rider.getCurrentOrderCount() >= RiderCapacity.MAX_CONCURRENT_ORDERS) {
+        if (riderId == null) {
             return null;
         }
-        double distanceKm = geoResult.getDistance().in(Metrics.KILOMETERS).getValue();
-        return new NearbyRiderResponse(
+        Rider rider = ridersById.get(riderId);
+        if (!riderLocationPolicy.isEligible(rider, dbNow)) {
+            return null;
+        }
+        double distanceKm = riderLocationPolicy.distanceKm(
+                longitude, latitude, rider.getLongitude(), rider.getLatitude());
+        if (distanceKm > radiusKm) {
+            return null;
+        }
+        NearbyRiderResponse response = new NearbyRiderResponse(
                 rider.getId(), rider.getRiderNo(), rider.getName(),
                 BigDecimal.valueOf(distanceKm).setScale(3, java.math.RoundingMode.HALF_UP),
                 rider.getCurrentOrderCount());
+        return new NearbyRiderCandidate(response, distanceKm);
+    }
+
+    private record NearbyRiderCandidate(NearbyRiderResponse response, double distanceKm) {
     }
 
     private Long riderIdFromGeoMember(String member) {
-        if (!member.startsWith(GEO_RIDER_MEMBER_PREFIX)) {
-            throw new IllegalStateException("骑手 GEO 索引数据格式错误: " + member);
+        if (member == null || !member.startsWith(GEO_RIDER_MEMBER_PREFIX)) {
+            return null;
         }
-        return Long.valueOf(member.substring(GEO_RIDER_MEMBER_PREFIX.length()));
-    }
-
-    private void syncRiderLocationToGeo(Rider rider) {
-        if (rider.getStatus() == null || !Integer.valueOf(RiderStatus.AVAILABLE.getCode()).equals(rider.getStatus())
-                || rider.getLongitude() == null || rider.getLatitude() == null) {
-            removeRiderFromGeo(rider.getId());
-            return;
+        String suffix = member.substring(GEO_RIDER_MEMBER_PREFIX.length());
+        if (!suffix.matches("[1-9][0-9]*")) {
+            return null;
         }
         try {
-            stringRedisTemplate.opsForGeo().add(
-                    AVAILABLE_RIDER_GEO_KEY,
-                    new Point(rider.getLongitude().doubleValue(), rider.getLatitude().doubleValue()),
-                    GEO_RIDER_MEMBER_PREFIX + rider.getId());
-        } catch (DataAccessException e) {
-            log.warn("Redis GEO 同步骑手位置失败，riderId={}", rider.getId(), e);
-        }
-    }
-
-    private void removeRiderFromGeo(Long riderId) {
-        try {
-            stringRedisTemplate.opsForGeo().remove(
-                    AVAILABLE_RIDER_GEO_KEY, GEO_RIDER_MEMBER_PREFIX + riderId);
-        } catch (DataAccessException e) {
-            log.warn("Redis GEO 移除骑手位置失败，riderId={}", riderId, e);
+            return Long.valueOf(suffix);
+        } catch (NumberFormatException e) {
+            return null;
         }
     }
 
@@ -543,6 +543,7 @@ public class RiderService {
         copy.setStatus(source.getStatus());
         copy.setLongitude(source.getLongitude());
         copy.setLatitude(source.getLatitude());
+        copy.setLastLocationAt(source.getLastLocationAt());
         copy.setCurrentOrderCount(source.getCurrentOrderCount());
         copy.setCreatedAt(source.getCreatedAt());
         copy.setUpdatedAt(source.getUpdatedAt());

@@ -19,6 +19,7 @@ public class Rider {
     private Integer status;
     private BigDecimal longitude;
     private BigDecimal latitude;
+    private LocalDateTime lastLocationAt;
     private Integer currentOrderCount;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

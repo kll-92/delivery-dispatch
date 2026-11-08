@@ -12,12 +12,16 @@ import com.kll.deliverydispatch.order.mapper.DispatchOutboxMapper;
 import com.kll.deliverydispatch.rider.entity.Rider;
 import com.kll.deliverydispatch.rider.mapper.RiderMapper;
 import com.kll.deliverydispatch.rider.service.RiderService;
+import com.kll.deliverydispatch.rider.location.RiderLocationPolicy;
+import com.kll.deliverydispatch.rider.location.RiderLocationProperties;
+import com.kll.deliverydispatch.rider.dto.NearbyRiderResponse;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
@@ -51,6 +55,9 @@ class DeliveryOrderServiceTest {
 
     @Mock
     private OperationLogService operationLogService;
+
+    @Spy
+    private RiderLocationPolicy riderLocationPolicy = new RiderLocationPolicy(new RiderLocationProperties());
 
     @InjectMocks
     private DeliveryOrderService deliveryOrderService;
@@ -277,7 +284,9 @@ class DeliveryOrderServiceTest {
     void shouldRejectAssignmentWhenTheOrderChangesAfterTheRiderSlotIsClaimed() {
         when(deliveryOrderMapper.selectById(1L)).thenReturn(order(1L, 0, null));
         when(riderMapper.selectById(2L)).thenReturn(rider(2L, 1, 0));
-        when(riderMapper.tryClaimForOrder(2L, 1, 3)).thenReturn(1);
+        when(riderMapper.selectByIdForUpdate(2L)).thenReturn(rider(2L, 1, 0));
+        when(riderMapper.selectUtcNow()).thenReturn(NOW);
+        when(riderMapper.tryClaimForOrder(2L, 1, 3, 300)).thenReturn(1);
         when(deliveryOrderMapper.assignIfPending(1L, 2L, 0, 1)).thenReturn(0);
 
         assertThrows(IllegalArgumentException.class, () -> deliveryOrderService.assignRider(1L, 2L));
@@ -285,6 +294,69 @@ class DeliveryOrderServiceTest {
         verify(deliveryOrderMapper).assignIfPending(1L, 2L, 0, 1);
         verifyNoInteractions(riderService);
     }
+
+    @Test
+    void shouldRejectExpiredManualRiderBeforeClaimingCapacity() {
+        Rider stale = rider(2L, 1, 0);
+        stale.setLastLocationAt(NOW.minusSeconds(300));
+        when(deliveryOrderMapper.selectById(1L)).thenReturn(order(1L, 0, null));
+        when(riderMapper.selectById(2L)).thenReturn(stale);
+        when(riderMapper.selectByIdForUpdate(2L)).thenReturn(stale);
+        when(riderMapper.selectUtcNow()).thenReturn(NOW);
+        assertThrows(IllegalArgumentException.class, () -> deliveryOrderService.assignRider(1L, 2L));
+        org.mockito.Mockito.verify(riderMapper, org.mockito.Mockito.never())
+                .tryClaimForOrder(any(), org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt(),
+                        org.mockito.ArgumentMatchers.anyLong());
+        verifyNoInteractions(riderService, operationLogService);
+    }
+
+    @Test
+    void shouldRollBackIfLocationExpiresWhileWaitingForTheOrderLock() {
+        Rider fresh = rider(2L, 1, 0);
+        fresh.setLastLocationAt(NOW.minusSeconds(299));
+        when(deliveryOrderMapper.selectById(1L)).thenReturn(order(1L, 0, null));
+        when(riderMapper.selectById(2L)).thenReturn(fresh);
+        when(riderMapper.selectByIdForUpdate(2L)).thenReturn(fresh);
+        when(riderMapper.selectUtcNow()).thenReturn(NOW, NOW.plusSeconds(2));
+        when(riderMapper.tryClaimForOrder(2L, 1, 3, 300)).thenReturn(1);
+        when(deliveryOrderMapper.assignIfPending(1L, 2L, 0, 1)).thenReturn(1);
+        assertThrows(IllegalArgumentException.class, () -> deliveryOrderService.assignRider(1L, 2L));
+        verifyNoInteractions(riderService, operationLogService);
+    }
+
+    @Test
+    void shouldRecheckDatabaseDistanceBeforeAutoAssignment() {
+        DeliveryOrder pending = order(1L, 0, null);
+        pending.setMerchantLongitude(BigDecimal.ZERO);
+        pending.setMerchantLatitude(BigDecimal.ZERO);
+        Rider moved = rider(2L, 1, 0);
+        moved.setLongitude(BigDecimal.TEN);
+        when(deliveryOrderMapper.selectById(1L)).thenReturn(pending);
+        when(riderService.findNearby(BigDecimal.ZERO, BigDecimal.ZERO, 5, 20)).thenReturn(
+                java.util.List.of(new NearbyRiderResponse(2L, "R2", "rider", BigDecimal.ZERO, 0)));
+        when(riderMapper.selectByIdForUpdate(2L)).thenReturn(moved);
+        when(riderMapper.selectUtcNow()).thenReturn(NOW);
+        assertThrows(NoAvailableRiderException.class, () -> deliveryOrderService.dispatch(1L));
+        org.mockito.Mockito.verify(riderMapper, org.mockito.Mockito.never())
+                .tryClaimForOrder(any(), org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt(),
+                        org.mockito.ArgumentMatchers.anyLong());
+    }
+
+    @Test
+    void shouldAllowFreshManualAssignmentOutsideAutomaticRadius() {
+        Rider far = rider(2L, 1, 0);
+        far.setLongitude(BigDecimal.TEN);
+        when(deliveryOrderMapper.selectById(1L)).thenReturn(order(1L, 0, null));
+        when(riderMapper.selectById(2L)).thenReturn(far);
+        when(riderMapper.selectByIdForUpdate(2L)).thenReturn(far);
+        when(riderMapper.selectUtcNow()).thenReturn(NOW);
+        when(riderMapper.tryClaimForOrder(2L, 1, 3, 300)).thenReturn(1);
+        when(deliveryOrderMapper.assignIfPending(1L, 2L, 0, 1)).thenReturn(1);
+        assertEquals(1, deliveryOrderService.assignRider(1L, 2L).getStatus());
+        verify(riderService).synchronizeDispatchIndexAfterCommit(2L);
+    }
+
+    private static final LocalDateTime NOW = LocalDateTime.of(2026, 10, 7, 8, 0);
 
     private DeliveryOrder order(Long id, Integer status, Long riderId) {
         DeliveryOrder order = new DeliveryOrder();
@@ -314,6 +386,9 @@ class DeliveryOrderServiceTest {
         rider.setId(id);
         rider.setStatus(status);
         rider.setCurrentOrderCount(currentOrderCount);
+        rider.setLongitude(BigDecimal.ZERO);
+        rider.setLatitude(BigDecimal.ZERO);
+        rider.setLastLocationAt(NOW);
         return rider;
     }
 }

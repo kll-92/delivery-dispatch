@@ -4,7 +4,9 @@
 
 ## 运行项目
 
-本地 MySQL 已使用 Docker 在 `3307` 端口启动。不要把真实密码提交到仓库；先复制 `.env.example` 的变量到 IDE 的运行配置，或在终端临时设置：
+运行项目需要 MySQL、Redis 和 RocketMQ。`docker-compose.rocketmq.yml` 只启动 RocketMQ；MySQL 和 Redis 需要在运行者自己的电脑上准备。默认连接 MySQL `localhost:3307` 上的 `delivery_dispatch` 数据库（用户 `delivery_user`），以及 Redis `localhost:6380`。数据库、MySQL 用户和授权需要自行创建，项目不会自动创建它们。如果本机端口、库名或用户名不同，请设置 `DB_URL`、`DB_USERNAME`、`REDIS_HOST` 和 `REDIS_PORT`。当前 Redis 配置没有密码项，需要使用未启用密码的本地 Redis。
+
+`DB_PASSWORD` 填本机 MySQL 账号的密码；`BOOTSTRAP_ADMIN_PASSWORD` 是应用首次初始化管理员账号时使用的登录密码，两者不是同一个密码。把这些值填入 IDE 的运行配置，或在启动应用的终端中设置。`.env.example` 只提供变量名和示例值，Spring Boot 不会自动读取它；不要把真实密码提交到仓库。
 
 ```bash
 export DB_PASSWORD='你的本地数据库密码'
@@ -33,9 +35,10 @@ docker exec delivery-rocketmq-broker sh mqadmin updateTopic \
 
 ## 数据库脚本
 
-- 首次建库时执行 `src/main/resources/sql/01-schema.sql`。
+- 先创建 `delivery_dispatch` 数据库，再执行 `src/main/resources/sql/01-schema.sql` 创建业务表。
 - Transactional Outbox 功能增加后，已有数据库还需在 `delivery_dispatch` 数据库中执行一次 `src/main/resources/sql/02-outbox.sql`，创建派单事件表。该脚本使用 `CREATE TABLE IF NOT EXISTS`，可安全重复执行。
 - 登录和操作记录功能还需要依次执行 `src/main/resources/sql/03-accounts.sql`、`src/main/resources/sql/04-operation-log.sql`。两个脚本均可重复执行，不会删除既有骑手或订单。
+- 骑手位置有效期功能需要执行 `src/main/resources/sql/05-rider-location.sql`；它检查列是否存在后再添加 `last_location_at`，可重复运行。旧骑手的位置时间保持 `NULL`，不能凭已有坐标推断其位置仍有效，需要重新上报位置。
 - 首次启动且账号表为空时，应用用 `BOOTSTRAP_ADMIN_USERNAME` / `BOOTSTRAP_ADMIN_PASSWORD` 初始化管理员；数据库只保存 BCrypt 密码摘要。已有账号后，修改这两个环境变量不会重置密码。
 
 ## 登录、角色和管理操作
@@ -83,6 +86,31 @@ docker exec delivery-rocketmq-broker sh mqadmin updateTopic \
 | `3` | 已完成 |
 | `4` | 已取消 |
 
+## 骑手位置有效期与 GEO 恢复
+
+MySQL 中的 `last_location_at` 是独立的位置上报时间（UTC，微秒精度），不同于资料修改时间 `updated_at`。客户端不能指定或延长它：
+
+- 创建骑手时带有效坐标，算首次位置提交；不带坐标则没有位置时间。
+- `PUT /api/v1/riders/{id}/location` 是位置上报，即使坐标没变也更新时间。
+- 修改资料时只有坐标真正变化才更新时间；修改姓名、电话、启用或停用骑手不会让旧位置变新。
+
+默认有效期为 300 秒，达到或超过有效期（位置年龄 ≥ TTL）、没有上报时间、时间在未来、坐标非法、已停用或满载的骑手都不参与派单。附近查询只用 Redis GEO 召回候选，再用 MySQL 的位置事实校验，并按数据库坐标重新计算距离。Redis 坐标陈旧时可能暂时漏掉候选，但不能凭旧索引给不合格骑手派单。
+
+手动与自动派单共用最终校验：先锁住骑手当前行，锁等待结束后再读数据库时间；名额条件更新继续检查状态、容量和位置时间，自动派单还检查实际距离。订单条件更新之后再次检查位置是否在等待订单锁时过期，失败则整个事务回滚，包括刚占用的名额。手动指派不强制自动派单的 5 公里范围，但同样要求位置有效。
+
+GEO 是派生索引，不是位置事实。事务提交后只把骑手 ID 交给有界后台队列（单工作线程、最多 100 个等待任务），避免请求线程在事务资源清理前等待另一个数据库连接。同步在每骑手 Redis 锁内以新事务读取数据库最新状态，再由 Lua 校验锁 token 后原子添加或移除 GEO 成员。过期锁持有者不能覆盖新同步；队列满或 Redis 同步失败只记录失败，由定时恢复兜底，不把已提交的位置修改伪装成回滚。
+
+应用启动时执行一批校准，随后定时循环扫描数据库 ID 和 GEO 成员：恢复仍有效且可调度的骑手，清理过期、停用、满载及数据库中不存在的成员。不删除整个 GEO key，不刷新位置时间，也不把整个索引设置为一个统一 TTL。Redis 不可用时保留数据库事实，恢复连接后靠后续扫描收敛；这是最终一致的恢复机制，不是 MySQL 与 Redis 的分布式事务。
+
+| 环境变量 | 默认值 | 含义 |
+| --- | ---: | --- |
+| `RIDER_LOCATION_TTL_SECONDS` | 300 | 位置有效期（秒） |
+| `RIDER_GEO_RECOVERY_ENABLED` | true | 是否执行启动/定时恢复 |
+| `RIDER_GEO_RECOVERY_DELAY_MS` | 30000 | 恢复批次间隔（毫秒） |
+| `RIDER_GEO_RECOVERY_BATCH_SIZE` | 100 | 每轮数据库及 GEO 各处理的骑手数预算 |
+
+时间和批次配置必须为正数。全库校准需要多轮，恢复耗时与骑手数量、批次大小和间隔有关；调大数据量时应据此调整，而不是期待一轮恢复所有骑手。目前实现针对现有单实例 Redis，未增加 Redis Cluster 或新的中间件。
+
 ## 消息链路排查
 
 查看 Topic 队列偏移量：
@@ -118,7 +146,9 @@ LIMIT 20;
 mvn test
 ```
 
-2026-10-07 在 JDK 21 下执行 `mvn test`，69 项测试全部通过，无失败或跳过。覆盖登录与权限、账号安全、请求校验、分页、审计事务、全库统计，以及原有订单并发、Redis 故障回源、GEO、补偿扫描和消息组件。`pom.xml` 通过 Surefire 在测试 JVM 启动时显式加载 Mockito Agent，避免运行期自附加失败。
+2026-10-07 本阶段最终在 JDK 21 下执行 `mvn test`，96 项测试全部通过，无失败或跳过（第一阶段基线为 69 项）。覆盖登录与权限、账号安全、请求校验、分页、审计事务、全库统计，以及订单并发、Redis 故障回源、位置有效期、GEO 校准、补偿扫描和消息组件。`pom.xml` 通过 Surefire 在测试 JVM 启动时显式加载 Mockito Agent，避免运行期自附加失败。
+
+位置阶段的详细验收见 [`verification/location-geo-acceptance-2026-10-07.md`](verification/location-geo-acceptance-2026-10-07.md)。使用独立 MySQL 验证库、专用 Redis 容器和 18082 端口，实际验证了位置过期过滤、等待行锁后过期的事务回滚、GEO 丢失与 Redis 重启恢复；另有 16 个独立会话对 100 单争抢同一骑手，结果是 3 个成功、97 个拒绝，完成后容量回到 0。第一阶段的 18 组真实接口回归也全部通过。前端本轮未修改，`npm run build` 回归通过；真实 MQ 投递没有在本轮重测。
 
 第一阶段真实接口验收结果见 [`verification/stage1-smoke-2026-10-07.json`](verification/stage1-smoke-2026-10-07.json)：18 组检查通过，包括匿名 401、越权 403、CSRF 拒绝、DTO 防止篡改服务端字段、分页及时间筛选、全库统计、骑手启停、配送容量 `0 → 1 → 0`、各状态订单修改费用/删除及审计、停用账号使旧会话失效。临时让审计表不可用后，创建订单返回 500，订单和 Outbox 行数均未增加，验证了真实事务回滚。
 
@@ -165,4 +195,4 @@ python3 scripts/recovery_smoke.py --output verification/recovery-smoke-local.jso
 
 ## 后续开发顺序
 
-本轮补全登录权限、分页查询、请求 DTO 和操作记录。后续依次完善骑手位置有效期及 GEO 重建、失败派单处理和人工重试、SSE 订单状态推送，再补 Testcontainers 与 CI 的可复现验证。课程及学习笔记已由用户移出本仓库；项目运行和接口说明以本 README 为入口。
+登录权限、分页查询、请求 DTO 和操作记录已完成；本阶段专注骑手位置有效期及 GEO 恢复。失败派单处理和人工重试、SSE 订单状态推送、Testcontainers 与 CI 都没有在本阶段开始。课程及学习笔记已由用户移出本仓库；项目运行和接口说明以本 README 为入口。

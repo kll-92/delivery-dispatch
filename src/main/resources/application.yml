@@ -45,6 +45,11 @@ rocketmq:
     send-message-timeout: 3000
 
 dispatch:
+  rider-location:
+    ttl-seconds: ${RIDER_LOCATION_TTL_SECONDS:300}
+    recovery-enabled: ${RIDER_GEO_RECOVERY_ENABLED:true}
+    recovery-delay-ms: ${RIDER_GEO_RECOVERY_DELAY_MS:30000}
+    recovery-batch-size: ${RIDER_GEO_RECOVERY_BATCH_SIZE:100}
   pending-recovery:
     enabled: ${DISPATCH_PENDING_RECOVERY_ENABLED:true}
     delay-ms: ${DISPATCH_PENDING_RECOVERY_DELAY_MS:30000}

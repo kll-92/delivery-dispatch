@@ -6,6 +6,7 @@ create table rider(
     status tinyint not null default 0,
     longitude decimal(10,7),
     latitude decimal(10,7),
+    last_location_at DATETIME(6) NULL,
     current_order_count int not null default 0,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

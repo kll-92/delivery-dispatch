@@ -15,6 +15,7 @@ import com.kll.deliverydispatch.rider.entity.Rider;
 import com.kll.deliverydispatch.rider.enums.RiderStatus;
 import com.kll.deliverydispatch.rider.mapper.RiderMapper;
 import com.kll.deliverydispatch.rider.service.RiderService;
+import com.kll.deliverydispatch.rider.location.RiderLocationPolicy;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -37,6 +38,7 @@ public class DeliveryOrderService {
     private final RiderMapper riderMapper;
     private final RiderService riderService;
     private final OperationLogService operationLogService;
+    private final RiderLocationPolicy riderLocationPolicy;
 
     @Transactional
     public DeliveryOrder create(DeliveryOrder order){
@@ -162,7 +164,7 @@ public class DeliveryOrderService {
                 .toList();
 
         for (NearbyRiderResponse candidate : candidates) {
-            if (tryAssign(order, candidate.riderId())) {
+            if (tryAssign(order, candidate.riderId(), true)) {
                 DeliveryOrder before = copyOrder(order);
                 order.setRiderId(candidate.riderId());
                 order.setStatus(OrderStatus.ASSIGNED.getCode());
@@ -227,6 +229,7 @@ public class DeliveryOrderService {
             throw new IllegalStateException("骑手接单数据异常，无法释放名额");
         }
         riderService.evictDetailCache(order.getRiderId());
+        riderService.synchronizeDispatchIndexAfterCommit(order.getRiderId());
         order.setStatus(OrderStatus.COMPLETED.getCode());
         operationLogService.record("COMPLETE", "ORDER", orderId, before, copyOrder(order), null);
         return order;
@@ -296,6 +299,7 @@ public class DeliveryOrderService {
                 throw new IllegalStateException("骑手名额释放失败，暂不能删除订单");
             }
             riderService.evictDetailCache(order.getRiderId());
+            riderService.synchronizeDispatchIndexAfterCommit(order.getRiderId());
         }
         dispatchOutboxMapper.deletePendingByOrderId(orderId);
         operationLogService.record("DELETE", "ORDER", orderId, before, null, deletionReason);
@@ -308,8 +312,8 @@ public class DeliveryOrderService {
         if (rider == null || !Integer.valueOf(RiderStatus.AVAILABLE.getCode()).equals(rider.getStatus())) {
             throw new IllegalArgumentException("骑手当前不可接单");
         }
-        if (!tryAssign(order, rider.getId())) {
-            throw new IllegalArgumentException("骑手刚被其他订单占用，请重新选择");
+        if (!tryAssign(order, rider.getId(), false)) {
+            throw new IllegalArgumentException("骑手位置无效或接单状态已变化，请重新上报位置并刷新后重试");
         }
         order.setRiderId(rider.getId());
         order.setStatus(OrderStatus.ASSIGNED.getCode());
@@ -319,9 +323,21 @@ public class DeliveryOrderService {
     /**
      * 先原子占用骑手，再条件更新订单。订单状态已变化时抛异常，事务会回滚前面的骑手占用。
      */
-    private boolean tryAssign(DeliveryOrder order, Long riderId) {
+    private boolean tryAssign(DeliveryOrder order, Long riderId, boolean enforceRadius) {
+        // Obtain the current row, not a repeatable-read snapshot. Only read the clock
+        // after waiting for its lock: a search-time cutoff can already be obsolete.
+        Rider latest = riderMapper.selectByIdForUpdate(riderId);
+        if (latest == null || !riderLocationPolicy.isEligible(latest, riderMapper.selectUtcNow())) {
+            return false;
+        }
+        if (enforceRadius && riderLocationPolicy.distanceKm(
+                order.getMerchantLongitude(), order.getMerchantLatitude(),
+                latest.getLongitude(), latest.getLatitude()) > DISPATCH_RADIUS_KM) {
+            return false;
+        }
         int claimed = riderMapper.tryClaimForOrder(
-                riderId, RiderStatus.AVAILABLE.getCode(), RiderCapacity.MAX_CONCURRENT_ORDERS);
+                riderId, RiderStatus.AVAILABLE.getCode(), RiderCapacity.MAX_CONCURRENT_ORDERS,
+                riderLocationPolicy.ttlSeconds());
         if (claimed == 0) {
             return false;
         }
@@ -331,7 +347,13 @@ public class DeliveryOrderService {
         if (assigned == 0) {
             throw new IllegalArgumentException("订单状态已变化，请刷新后重试");
         }
+        // The order row may also have been locked by another transaction. Reject
+        // expiry during that wait and roll back BOTH assignment and rider capacity.
+        if (!riderLocationPolicy.isFresh(latest, riderMapper.selectUtcNow())) {
+            throw new IllegalArgumentException("骑手位置已过期，请重新上报位置后派单");
+        }
         riderService.evictDetailCache(riderId);
+        riderService.synchronizeDispatchIndexAfterCommit(riderId);
         return true;
     }
 
