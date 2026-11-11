@@ -13,6 +13,7 @@ import java.time.LocalDateTime;
 public class Rider {
     @TableId(value = "id",type = IdType.AUTO)
     private Long id;
+    private Long accountId;
     private String riderNo;
     private String name;
     private String phone;

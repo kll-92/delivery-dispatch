@@ -102,11 +102,17 @@ public class AccountService {
         if (!StringUtils.hasText(role)) {
             throw new IllegalArgumentException("角色不能为空");
         }
+        AccountRole parsed;
         try {
-            return AccountRole.valueOf(role.trim().toUpperCase(java.util.Locale.ROOT));
+            parsed = AccountRole.valueOf(role.trim().toUpperCase(java.util.Locale.ROOT));
         } catch (IllegalArgumentException exception) {
             throw new IllegalArgumentException("角色只能是 ADMIN 或 DISPATCHER");
         }
+        // MERCHANT 只能自助注册，RIDER 随骑手创建，避免出现"有账号没店铺/没骑手"的脏数据
+        if (parsed != AccountRole.ADMIN && parsed != AccountRole.DISPATCHER) {
+            throw new IllegalArgumentException("管理员只能创建 ADMIN 或 DISPATCHER；商家请自助注册，骑手账号随骑手创建");
+        }
+        return parsed;
     }
 
     public static void validatePassword(String password) {

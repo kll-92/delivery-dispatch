@@ -13,6 +13,7 @@ import java.time.LocalDateTime;
 public class DeliveryOrder {
     @TableId(value = "id",type= IdType.AUTO)
     private Long id;
+    private Long merchantId;
     private String orderNo;
     private String merchantName;
     private String merchantPhone;

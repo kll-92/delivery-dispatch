@@ -13,6 +13,7 @@ public class Account {
     @TableId(value = "id", type = IdType.AUTO)
     private Long id;
     private String username;
+    private String displayName;
     private String passwordHash;
     private String role;
     private Boolean enabled;

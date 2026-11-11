@@ -86,7 +86,8 @@ public class SecurityConfig {
                 .authenticationProvider(accountAuthenticationProvider)
                 .securityContext(context -> context.securityContextRepository(securityContextRepository))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
-                .csrf(csrf -> csrf.csrfTokenRepository(csrfTokenRepository))
+                .csrf(csrf -> csrf.csrfTokenRepository(csrfTokenRepository)
+                        .ignoringRequestMatchers("/api/v1/auth/register/merchant"))
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint((request, response, authException) ->
                                 errorWriter.write(response, HttpStatus.UNAUTHORIZED, "请先登录"))
@@ -97,8 +98,12 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/ping", "/api/v1/auth/csrf",
                                 "/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/login").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/register/merchant").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         .requestMatchers("/api/v1/auth/logout", "/api/v1/auth/me").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/merchant/me/**").hasRole("MERCHANT")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/merchant/me/**").hasRole("MERCHANT")
+                        .requestMatchers("/api/v1/rider/me/**").hasRole("RIDER")
                         .requestMatchers("/api/v1/accounts/**", "/api/v1/operation-logs/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PATCH, "/api/v1/orders/*/fee").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/orders/**").hasRole("ADMIN")
