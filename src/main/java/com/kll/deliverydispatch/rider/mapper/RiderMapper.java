@@ -13,6 +13,10 @@ import java.time.LocalDateTime;
 @Mapper
 public interface RiderMapper extends BaseMapper<Rider> {
 
+    /** 按登录账号查骑手，未绑定时返回 null。 */
+    @Select("SELECT * FROM rider WHERE account_id = #{accountId}")
+    Rider selectByAccountId(@Param("accountId") Long accountId);
+
     @Select("SELECT * FROM rider WHERE id = #{riderId} FOR UPDATE")
     Rider selectByIdForUpdate(@Param("riderId") Long riderId);
 
