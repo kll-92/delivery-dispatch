@@ -95,7 +95,8 @@ public class DeliveryOrderService {
         dispatchOutboxMapper.insert(outboxMessage);
         operationLogService.record("CREATE", "ORDER", order.getId(), null,
                 copyOrder(order), null);
-        return order;
+        // 回读一次，拿到数据库生成的 created_at / updated_at 默认值
+        return deliveryOrderMapper.selectById(order.getId());
     }
 
     public DeliveryOrder getById(Long id) {
