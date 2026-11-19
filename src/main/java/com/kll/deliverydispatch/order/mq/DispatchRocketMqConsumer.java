@@ -2,6 +2,7 @@ package com.kll.deliverydispatch.order.mq;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kll.deliverydispatch.common.trace.TraceContext;
 import com.kll.deliverydispatch.order.event.DispatchEventTypes;
 import com.kll.deliverydispatch.order.service.DeliveryOrderService;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +32,16 @@ public class DispatchRocketMqConsumer implements RocketMQListener<String> {
     @Override
     public void onMessage(String payload) {
         DispatchMessage message = readMessage(payload);
+        // 消费线程是新线程，MDC 里没有 traceId；把下单时存下的恢复回来
+        TraceContext.put(message.traceId());
+        try {
+            handle(message);
+        } finally {
+            TraceContext.clear();
+        }
+    }
+
+    private void handle(DispatchMessage message) {
         if (!DispatchEventTypes.DISPATCH_REQUEST.equals(message.eventType())) {
             log.warn("忽略未知 RocketMQ 派单事件，outboxId={}, eventType={}",
                     message.outboxId(), message.eventType());

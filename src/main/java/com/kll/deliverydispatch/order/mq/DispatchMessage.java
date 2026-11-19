@@ -6,6 +6,7 @@ public record DispatchMessage(
         Long outboxId,
         Long orderId,
         String eventType,
+        String traceId,
         Instant createdAt
 ) {
 }

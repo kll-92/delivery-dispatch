@@ -43,6 +43,7 @@ public class DispatchOutboxPublisher {
                         message.getId(),
                         message.getOrderId(),
                         message.getEventType(),
+                        message.getTraceId(),
                         Instant.now()));
                 sendResult = rocketMQTemplate.syncSend(DispatchRocketMqConstants.DESTINATION, payload);
             } catch (JsonProcessingException | RuntimeException e) {

@@ -2,6 +2,7 @@ package com.kll.deliverydispatch.order.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.kll.deliverydispatch.common.audit.OperationLogService;
+import com.kll.deliverydispatch.common.trace.TraceContext;
 import com.kll.deliverydispatch.common.dto.PageResult;
 import com.kll.deliverydispatch.order.entity.DeliveryOrder;
 import com.kll.deliverydispatch.order.entity.DispatchOutboxMessage;
@@ -91,6 +92,7 @@ public class DeliveryOrderService {
         DispatchOutboxMessage outboxMessage = new DispatchOutboxMessage();
         outboxMessage.setOrderId(order.getId());
         outboxMessage.setEventType(DispatchEventTypes.DISPATCH_REQUEST);
+        outboxMessage.setTraceId(TraceContext.current());
         outboxMessage.setStatus(DispatchOutboxMessage.PENDING);
         dispatchOutboxMapper.insert(outboxMessage);
         operationLogService.record("CREATE", "ORDER", order.getId(), null,

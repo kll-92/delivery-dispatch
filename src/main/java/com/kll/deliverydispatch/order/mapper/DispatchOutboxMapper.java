@@ -20,7 +20,7 @@ public interface DispatchOutboxMapper extends BaseMapper<DispatchOutboxMessage> 
      * 在事务中锁定待投递行；多个发布器并行运行时跳过彼此已锁定的行。
      */
     @Select("""
-            SELECT id, order_id, event_type, status, created_at, published_at
+            SELECT id, order_id, event_type, trace_id, status, created_at, published_at
             FROM dispatch_outbox
             WHERE status = 0
             ORDER BY id ASC

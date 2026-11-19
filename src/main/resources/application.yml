@@ -32,6 +32,11 @@ springdoc:
   swagger-ui:
     path: /swagger-ui.html
 
+# 日志格式：每条日志带 [traceId]，便于把一次请求的所有日志串起来
+logging:
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %-5level [%X{traceId}] %logger{36} - %msg%n"
+
 management:
   endpoints:
     web:

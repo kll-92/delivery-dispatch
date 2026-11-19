@@ -20,6 +20,8 @@ public class DispatchOutboxMessage {
     private Long id;
     private Long orderId;
     private String eventType;
+    /** 下单时产生的 traceId，用于把异步派单日志串回原请求。 */
+    private String traceId;
     private Integer status;
     private LocalDateTime createdAt;
     private LocalDateTime publishedAt;
