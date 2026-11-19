@@ -5,6 +5,7 @@ import com.kll.deliverydispatch.account.entity.Account;
 import com.kll.deliverydispatch.account.mapper.AccountMapper;
 import com.kll.deliverydispatch.common.dto.PageResult;
 import com.kll.deliverydispatch.common.exception.ConflictException;
+import com.kll.deliverydispatch.common.ratelimit.MinIntervalLimiter;
 import com.kll.deliverydispatch.order.entity.DeliveryOrder;
 import com.kll.deliverydispatch.order.enums.OrderStatus;
 import com.kll.deliverydispatch.order.mapper.DeliveryOrderMapper;
@@ -33,11 +34,15 @@ import java.util.List;
 @RequiredArgsConstructor
 public class RiderWorkbenchService {
 
+    /** 位置上报的最小间隔（秒），两次上报太近会丢弃。 */
+    private static final long MIN_REPORT_INTERVAL_SECONDS = 3;
+
     private final AccountMapper accountMapper;
     private final RiderMapper riderMapper;
     private final DeliveryOrderMapper deliveryOrderMapper;
     private final DeliveryOrderService deliveryOrderService;
     private final RiderService riderService;
+    private final MinIntervalLimiter minIntervalLimiter;
 
     public Rider profile(String username) {
         return requireRider(username);
@@ -124,6 +129,10 @@ public class RiderWorkbenchService {
     /** 上报自己的位置。骑手 id 来自登录态，请求体里没有这个字段。 */
     public Rider updateMyLocation(String username, RiderLocationRequest request) {
         Rider rider = requireRider(username);
+        // 两次上报至少间隔 3 秒；太频繁直接丢弃（静默，避免客户端疯狂重试）
+        if (!minIntervalLimiter.tryAcquire("loc-interval:" + rider.getId(), MIN_REPORT_INTERVAL_SECONDS)) {
+            return rider;
+        }
         return riderService.updateLocation(rider.getId(), request);
     }
 
