@@ -53,3 +53,54 @@ dispatch:
   pending-recovery:
     enabled: ${DISPATCH_PENDING_RECOVERY_ENABLED:true}
     delay-ms: ${DISPATCH_PENDING_RECOVERY_DELAY_MS:30000}
+
+# 接口限流：令牌桶 + Redis Lua。
+# 阈值按本项目真实量级配置（区域平台），目的是能被触发、能演示；
+# 规模化后的推演见 docs/rate-limit-design.md 第 5 节。
+rate-limit:
+  enabled: ${RATE_LIMIT_ENABLED:true}
+  skip-paths:
+    - /actuator/**
+    - /swagger-ui/**
+    - /v3/api-docs/**
+    - /api/v1/ping
+  default-rule:
+    capacity: 60
+    refill-per-second: 10
+    level: P1
+  rules:
+    # 匿名注册：按 IP，最严格（约 3 次/分钟）
+    - method: POST
+      path: /api/v1/auth/register/merchant
+      scope: IP
+      level: P3
+      capacity: 3
+      refill-per-second: 0.05
+    # 下单：P0，不允许误伤，容量给足
+    - method: POST
+      path: /api/v1/merchant/me/orders
+      scope: USER
+      level: P0
+      capacity: 10
+      refill-per-second: 0.2
+    # 商家查单：P1，可降级
+    - method: GET
+      path: /api/v1/merchant/me/orders
+      scope: USER
+      level: P1
+      capacity: 10
+      refill-per-second: 0.08
+    # 骑手位置上报：P2，真实语义是"最小间隔"，这里先用令牌桶兜底
+    - method: POST
+      path: /api/v1/rider/me/location
+      scope: USER
+      level: P2
+      capacity: 12
+      refill-per-second: 0.5
+    # 接单：P0
+    - method: PATCH
+      path: /api/v1/rider/me/orders/*/accept
+      scope: USER
+      level: P0
+      capacity: 5
+      refill-per-second: 0.15
