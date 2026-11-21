@@ -1,0 +1,10 @@
+target/
+frontend/node_modules/
+frontend/dist/
+.git/
+.idea/
+*.iml
+docs/
+verification/
+*.log
+.DS_Store

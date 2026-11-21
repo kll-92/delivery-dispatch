@@ -1,0 +1,127 @@
+# 一条命令起全套：MySQL + Redis + RocketMQ + 应用
+#
+#   docker compose up -d
+#
+# 说明：
+# 1. 下面所有「容器内」的地址都用服务名（mysql / redis / rocketmq-namesrv），
+#    不用 localhost —— 容器里的 localhost 指的是容器自己。
+# 2. 数据放在命名卷里，`docker compose down` 不会删；`down -v` 才会清空，慎用。
+# 3. 端口对外暴露是为了本地调试（Navicat / redis-cli / curl），生产环境应去掉。
+
+services:
+
+  # ---------- MySQL ----------
+  mysql:
+    image: mysql:8.4
+    container_name: delivery-mysql
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root123456}
+      MYSQL_DATABASE: delivery_dispatch
+      MYSQL_USER: delivery_user
+      MYSQL_PASSWORD: ${DB_PASSWORD:-Delivery123!}
+      TZ: Asia/Shanghai
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      # 首次启动自动建表：容器按文件名顺序执行 /docker-entrypoint-initdb.d 下的脚本
+      - ./src/main/resources/sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-root123456}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
+    networks: [delivery]
+
+  # ---------- Redis ----------
+  redis:
+    image: redis:7.4-alpine
+    container_name: delivery-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [delivery]
+
+  # ---------- RocketMQ NameServer ----------
+  rocketmq-namesrv:
+    image: apache/rocketmq:5.3.2
+    container_name: delivery-rocketmq-namesrv
+    command: sh mqnamesrv
+    ports:
+      - "19876:9876"
+    volumes:
+      - rocketmq-namesrv-logs:/home/rocketmq/logs
+    networks: [delivery]
+
+  # ---------- RocketMQ Broker ----------
+  rocketmq-broker:
+    image: apache/rocketmq:5.3.2
+    container_name: delivery-rocketmq-broker
+    command: sh mqbroker -n rocketmq-namesrv:9876 -c /home/rocketmq/rocketmq-5.3.2/conf/broker.conf
+    depends_on:
+      - rocketmq-namesrv
+    ports:
+      - "20909:20909"
+      - "20911:20911"
+      - "20912:20912"
+    volumes:
+      # 容器内运行用这份（brokerIP1=rocketmq-broker）；
+      # 应用跑在宿主机时用 ./docker/rocketmq/broker.conf（brokerIP1=127.0.0.1）
+      - ./docker/rocketmq/broker-compose.conf:/home/rocketmq/rocketmq-5.3.2/conf/broker.conf:ro
+      - rocketmq-broker-logs:/home/rocketmq/logs
+      - rocketmq-broker-store:/home/rocketmq/store
+    networks: [delivery]
+
+  # ---------- 应用 ----------
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: delivery-app
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rocketmq-namesrv:
+        condition: service_started
+    environment:
+      # 容器内用服务名，不用 localhost
+      DB_URL: jdbc:mysql://mysql:3306/delivery_dispatch?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC
+      DB_USERNAME: delivery_user
+      DB_PASSWORD: ${DB_PASSWORD:-Delivery123!}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      ROCKETMQ_NAME_SERVER: rocketmq-namesrv:9876
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-admin12345}
+      RATE_LIMIT_ENABLED: "true"
+      TZ: Asia/Shanghai
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    networks: [delivery]
+
+networks:
+  delivery:
+    name: delivery-network
+
+volumes:
+  mysql-data:
+    name: delivery-mysql-data
+  redis-data:
+    name: delivery-redis-data
+  rocketmq-namesrv-logs:
+    name: delivery-rocketmq-namesrv-logs
+  rocketmq-broker-logs:
+    name: delivery-rocketmq-broker-logs
+  rocketmq-broker-store:
+    name: delivery-rocketmq-broker-store
