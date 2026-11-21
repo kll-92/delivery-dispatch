@@ -9,6 +9,8 @@ target/
 # Frontend dependencies and build output
 node_modules/
 frontend/dist/
+frontend-vue/dist/
+*.tsbuildinfo
 npm-debug.log*
 
 # Python verification-script cache
