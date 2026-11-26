@@ -21,17 +21,17 @@ const router = createRouter({
     {
       path: '/merchant',
       component: () => import('../views/MerchantOrdersView.vue'),
-      meta: { role: 'MERCHANT' }
+      meta: { roles: ['MERCHANT'] }
     },
     {
       path: '/rider',
       component: () => import('../views/RiderWorkbenchView.vue'),
-      meta: { role: 'RIDER' }
+      meta: { roles: ['RIDER'] }
     },
     {
       path: '/admin',
       component: () => import('../views/AdminOrdersView.vue'),
-      meta: { role: 'ADMIN' }
+      meta: { roles: ['ADMIN', 'DISPATCHER'] }
     }
   ]
 })
@@ -54,8 +54,8 @@ router.beforeEach(async (to) => {
     return '/login'
   }
 
-  const required = to.meta.role as Role | undefined
-  if (required && session.role !== required) {
+  const allowedRoles = to.meta.roles as Role[] | undefined
+  if (allowedRoles && !allowedRoles.includes(session.role)) {
     return homeOf(session.role)
   }
   return true
