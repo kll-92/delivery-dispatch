@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import RoleWorkspace from "../components/RoleWorkspace.vue"
+import { localDateTime } from "./deliveryDisplay"
 import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import http, { resetCsrf } from '../api/http'
@@ -86,53 +88,34 @@ onMounted(loadOrders)
 </script>
 
 <template>
-  <el-container class="page">
-    <el-header class="header">
-      <span class="brand">商家端 · 我的订单</span>
-      <span class="right">
-        {{ session.username }}
-        <el-button link type="primary" @click="logout">退出</el-button>
-      </span>
-    </el-header>
-
-    <el-main>
-      <el-card>
-        <div class="toolbar">
-          <el-select v-model="status" placeholder="全部状态" clearable style="width: 150px" @change="loadOrders">
-            <el-option v-for="(text, code) in STATUS_TEXT" :key="code" :label="text" :value="Number(code)" />
-          </el-select>
-          <el-button type="primary" @click="dialogVisible = true">新建订单</el-button>
-        </div>
-
-        <el-table v-loading="loading" :data="orders" border style="margin-top: 12px">
-          <el-table-column prop="orderNo" label="订单号" width="240" />
-          <el-table-column prop="receiverName" label="收货人" width="100" />
-          <el-table-column prop="receiverAddress" label="收货地址" show-overflow-tooltip />
-          <el-table-column label="状态" width="100">
-            <template #default="{ row }">
-              <el-tag :type="row.status === 3 ? 'success' : row.status === 4 ? 'info' : 'warning'">
-                {{ STATUS_TEXT[row.status] ?? row.status }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="deliveryFee" label="配送费" width="100" />
-          <el-table-column prop="createdAt" label="创建时间" width="180" />
-        </el-table>
-
-        <el-pagination
-          v-model:current-page="page"
-          v-model:page-size="size"
-          :total="total"
-          :page-sizes="[10, 20, 50]"
-          layout="total, sizes, prev, pager, next"
-          style="margin-top: 16px; justify-content: flex-end"
-          @current-change="loadOrders"
-          @size-change="loadOrders"
-        />
-      </el-card>
-    </el-main>
-
-    <el-dialog v-model="dialogVisible" title="新建订单" width="480px">
+  <RoleWorkspace role-label="商家端" @logout="logout">
+    <header class="hero panel">
+      <div class="hero-copy"><h1>我的订单</h1><p class="subtitle">本店配送订单 · 共 {{ total }} 笔{{ status !== undefined ? '符合筛选' : '' }}</p>
+        <el-button type="primary" size="large" @click="dialogVisible = true">＋ 新建订单</el-button>
+      </div>
+      <img src="../assets/dispatch-city.jpg" alt="" />
+    </header>
+    <section class="panel ledger" aria-label="配送订单">
+      <div class="ledger-head"><h2>配送订单</h2>
+        <select v-model="status" aria-label="筛选订单状态" @change="page = 1; loadOrders()">
+          <option :value="undefined">全部状态</option>
+          <option v-for="(text, code) in STATUS_TEXT" :key="code" :value="Number(code)">{{ text }}</option>
+        </select>
+      </div>
+      <div v-loading="loading" class="rows">
+        <div class="ledger-row labels"><span>配送地址 / 收货人</span><span>创建时间 / 订单号</span><span>配送费</span><span>状态</span></div>
+        <article v-for="order in orders" :key="order.id" class="ledger-row">
+          <div><strong>{{ order.receiverAddress }}</strong><small>{{ order.receiverName }}</small></div>
+          <div class="order-id"><time>{{ localDateTime(order.createdAt) }}</time><small>{{ order.orderNo }}</small></div>
+          <span class="fee">¥ {{ Number(order.deliveryFee).toFixed(2) }}</span>
+          <span class="state" :data-state="order.status">{{ STATUS_TEXT[order.status] ?? order.status }}</span>
+        </article>
+        <p v-if="!loading && !orders.length" class="empty">暂无符合条件的订单</p>
+      </div>
+      <el-pagination class="pager" v-model:current-page="page" v-model:page-size="size" :page-sizes="[10,20,50]"
+        :total="total" :pager-count="5" layout="sizes, prev, pager, next" @current-change="loadOrders" @size-change="loadOrders" />
+    </section>
+    <el-dialog v-model="dialogVisible" title="新建订单" width="min(480px, 94vw)">
       <el-form label-width="90px">
         <el-form-item label="收货人">
           <el-input v-model="form.receiverName" />
@@ -158,31 +141,27 @@ onMounted(loadOrders)
         <el-button type="primary" :loading="submitting" @click="submitOrder">提交</el-button>
       </template>
     </el-dialog>
-  </el-container>
+  </RoleWorkspace>
 </template>
 
+<style scoped src="./rolePages.css"></style>
 <style scoped>
-.page {
-  height: 100%;
-}
-.header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: #fff;
-  border-bottom: 1px solid #e4e7ed;
-}
-.brand {
-  font-weight: 600;
-}
-.right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #606266;
-}
-.toolbar {
-  display: flex;
-  justify-content: space-between;
+.hero { display:flex; align-items:stretch; overflow:hidden; background:#f0f4ff; margin-bottom:24px; }
+.hero-copy { flex:1; padding:28px 32px; align-self:center; }
+.hero-copy p { margin:7px 0 20px; }
+.hero img { width:46%; object-fit:cover; object-position:center 48%; max-height:195px; mask-image:linear-gradient(90deg,transparent,black 22%); }
+.ledger { overflow:hidden; }
+.ledger-head { display:flex; align-items:center; justify-content:space-between; padding:20px 24px; }
+select { padding:7px 10px; border-radius:7px; border:1px solid #d7dfee; background:white; color:#43516b; }
+.ledger-row { display:grid; grid-template-columns:minmax(180px,1.4fr) minmax(200px,1fr) 85px 78px; align-items:center; gap:16px; padding:15px 24px; border-bottom:1px solid #ecf0f5; font-size:14px; }
+.ledger-row.labels { padding-block:9px; background:#f7f9fc; color:#64738b; font-size:12px; }
+.ledger-row small { display:block; color:#697991; margin-top:5px; font-size:12px; overflow-wrap:anywhere; }
+.fee,time { font-variant-numeric:tabular-nums; }
+@media(max-width:760px) {
+ .hero-copy { padding:20px; } .hero img { width:33%; }
+ .ledger-row { grid-template-columns:1fr auto; gap:10px; padding:13px 16px; }
+ .labels { display:none; } .order-id { grid-column:1; grid-row:2; }
+ .fee { grid-column:2; grid-row:2; } .state { grid-column:2; grid-row:1; }
+ .ledger-head { padding:16px; }
 }
 </style>
