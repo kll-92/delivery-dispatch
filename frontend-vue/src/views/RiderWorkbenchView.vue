@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import RoleWorkspace from "../components/RoleWorkspace.vue"
+import { localDateTime } from "./deliveryDisplay"
 // ========== 1. 引入需要的东西 ==========
 import { onMounted, ref } from 'vue'                 // onMounted：组件挂载后执行一次；ref：响应式变量
 import { ElMessage } from 'element-plus'            // 弹提示用
@@ -148,105 +150,59 @@ async function reportLocation() {
 </script>
 
 <template>
-  <el-container class="page">
-    <!-- 顶栏：标题 + 用户名 + 退出 -->
-    <el-header class="header">
-      <span class="brand">骑手端 · 工作台</span>
-      <span class="right">
-        {{ session.username }}
-        <el-button link type="primary" @click="logout">退出</el-button>
-      </span>
-    </el-header>
-
-    <el-main>
-      <!-- ① 资料卡片：profile 有值才显示（v-if），没值时显示"加载中" -->
-      <el-card v-if="profile" class="profile-card">
-        <div class="profile-row">
-          <span>姓名：{{ profile.name }}</span>
-          <span>工号：{{ profile.riderNo }}</span>
-          <span>
-            当前接单数：<b>{{ profile.currentOrderCount }}</b> / 3
-          </span>
-          <span class="muted">位置更新时间：{{ profile.lastLocationAt }}</span>
-          <el-button type="primary" size="small" @click="reportLocation">上报位置</el-button>
+  <RoleWorkspace role-label="骑手端" @logout="logout">
+    <header class="title-row"><div><h1>配送工作台</h1><p class="subtitle">我的配送任务</p></div></header>
+    <div class="rider-layout">
+      <aside class="profile panel" v-if="profile">
+        <div class="profile-head"><span class="avatar">{{ profile.name.slice(0,1) }}</span><div>
+          <h2>{{ profile.name }}</h2><span class="meta">骑手 · {{ profile.riderNo }}</span>
+        </div></div>
+        <div class="capacity"><span class="meta">当前接单数</span><strong>{{ profile.currentOrderCount }} <small>/ 3</small></strong>
+          <div class="meter" aria-hidden="true"><i v-for="n in 3" :key="n" :class="{ used: n <= profile.currentOrderCount }" /></div>
         </div>
-      </el-card>
-      <el-card v-else>加载中...</el-card>
-
-      <!-- ② 订单表格 -->
-      <el-card class="orders-card">
-        <el-table v-loading="loading" :data="orders" border>
-          <el-table-column prop="orderNo" label="订单号" width="240" />
-          <el-table-column prop="receiverName" label="收货人" width="100" />
-          <el-table-column prop="receiverAddress" label="收货地址" show-overflow-tooltip />
-
-          <!-- 状态列：用 v-if 决定显示什么按钮 -->
-          <el-table-column label="状态" width="120">
-            <template #default="{ row }">
-              <el-tag :type="row.status === 3 ? 'success' : row.status === 4 ? 'info' : 'warning'">
-                {{ STATUS_TEXT[row.status] ?? row.status }}
-              </el-tag>
-            </template>
-          </el-table-column>
-
-          <el-table-column label="操作" width="160">
-            <template #default="{ row }">
-              <el-button v-if="row.status === 0" size="small" type="primary" @click="accept(row.id)">接单</el-button>
-              <el-button v-if="row.status === 1" size="small" type="warning" @click="start(row.id)">开始配送</el-button>
-              <el-button v-if="row.status === 2" size="small" type="success" @click="complete(row.id)">送达</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-
-        <el-pagination
-          v-model:current-page="page"
-          v-model:page-size="size"
-          :total="total"
-          :page-sizes="[10, 20, 50]"
-          layout="total, sizes, prev, pager, next"
-          class="pager"
-          @current-change="loadOrders"
-          @size-change="loadOrders"
-        />
-      </el-card>
-    </el-main>
-  </el-container>
+        <span class="meta">上次位置更新</span><p class="location">{{ localDateTime(profile.lastLocationAt) }}</p>
+        <el-button plain type="primary" :loading="reporting" @click="reportLocation">上报位置</el-button>
+      </aside>
+      <aside v-else class="panel empty">正在读取骑手资料…</aside>
+      <section class="tasks panel" v-loading="loading">
+        <div class="tasks-head"><h2>配送任务</h2><span class="meta">共 {{ total }} 笔</span></div>
+        <article v-for="order in orders" :key="order.id" class="task">
+          <span class="state" :data-state="order.status">{{ STATUS_TEXT[order.status] ?? order.status }}</span>
+          <strong>{{ order.receiverAddress }}</strong><p>{{ order.receiverName }} 收</p><small>{{ order.orderNo }}</small>
+          <div class="action">
+            <el-button v-if="order.status === 0" type="primary" :disabled="accepting" @click="accept(order.id)">接单</el-button>
+            <el-button v-if="order.status === 1" type="primary" :disabled="starting" @click="start(order.id)">开始配送</el-button>
+            <el-button v-if="order.status === 2" type="success" :disabled="completing" @click="complete(order.id)">确认送达</el-button>
+          </div>
+        </article>
+        <p v-if="!loading && !orders.length" class="empty">暂无配送任务</p>
+        <el-pagination class="pager" v-model:current-page="page" v-model:page-size="size" :page-sizes="[10,20,50]"
+          :total="total" :pager-count="5" layout="sizes, prev, pager, next" @current-change="loadOrders" @size-change="loadOrders" />
+      </section>
+    </div>
+  </RoleWorkspace>
 </template>
 
+<style scoped src="./rolePages.css"></style>
 <style scoped>
-.page {
-  height: 100%;
-}
-.header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: #fff;
-  border-bottom: 1px solid #e4e7ed;
-}
-.brand {
-  font-weight: 600;
-}
-.right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #606266;
-}
-.profile-card {
-  margin-bottom: 16px;
-}
-.profile-row {
-  display: flex;
-  align-items: center;
-  gap: 24px;
-}
-.muted {
-  color: #909399;
-  font-size: 13px;
-}
-.pager {
-  margin-top: 16px;
-  justify-content: flex-end;
+.title-row .subtitle { margin-top:4px; }
+.rider-layout { display:grid; grid-template-columns:250px minmax(0,1fr); gap:22px; align-items:start; }
+.profile { padding:22px; background:linear-gradient(135deg,#ecf1ff 0%,white 70%); }
+.profile-head { display:flex; align-items:center; gap:12px; }
+.avatar { display:grid; place-items:center; width:42px; height:42px; color:#425fee; background:#dce5ff; border-radius:13px; font-weight:650; }
+.capacity { display:grid; gap:8px; margin:24px 0; }
+.capacity strong { font-size:32px; }.capacity small { color:#78879e; font-size:18px; }
+.meter { display:flex; gap:5px; }.meter i { flex:1; height:5px; border-radius:4px; background:#dce2ee; }.meter .used { background:#627cf2; }
+.location { font-size:14px; margin:3px 0 14px; }
+.tasks-head { display:flex; justify-content:space-between; align-items:center; padding:17px 22px; border-bottom:1px solid #e7ebf2; }
+.task { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:4px 12px; padding:15px 22px; border-bottom:1px solid #e7ebf2; }
+.task strong,.task p,.task small { grid-column:1; overflow-wrap:anywhere; }
+.task strong { font-size:17px; }.task p { color:#495b76; font-size:14px; }.task small { color:#748097; font-size:12px; }
+.action { grid-column:2; grid-row:2 / span 2; align-self:center; }
+@media(max-width:760px) {
+ .rider-layout { grid-template-columns:minmax(0,1fr); gap:14px; }.profile { padding:16px; display:grid; grid-template-columns:1fr auto; gap:6px 16px; align-items:center; }
+ .capacity { margin:0; grid-row:1 / span 2; grid-column:2; }.capacity strong { font-size:23px; }
+ .profile-head { grid-column:1; }.location { margin:0; }.profile button { justify-self:end; grid-column:2;grid-row:3; }
+ .task,.tasks-head { padding:14px 16px; }.title-row { margin-bottom:14px; }
 }
 </style>
