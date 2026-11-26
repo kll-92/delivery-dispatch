@@ -1,10 +1,85 @@
-# 同城即时配送智能调度与履约平台
+# 同城即时配送调度平台
 
-一个面向 Java 后端实习求职的配送调度项目：包括骑手与订单基础业务、Redis Cache Aside、Redis GEO 附近骑手候选、MySQL 条件更新并发保护，以及通过 Transactional Outbox + RocketMQ 实现的异步派单。Redis 继续负责缓存、GEO 和缓存重建锁，不再承担消息队列职责。
+**商家下单 → 平台派单 → 骑手履约**，三端可真实操作的完整业务闭环。
 
-## 运行项目
+后端 Spring Boot 3.5 / MySQL / Redis / RocketMQ，前端 Vue 3 + TypeScript + Element Plus。
 
-运行项目需要 MySQL、Redis 和 RocketMQ。`docker-compose.rocketmq.yml` 只启动 RocketMQ；MySQL 和 Redis 需要在运行者自己的电脑上准备。默认连接 MySQL `localhost:3307` 上的 `delivery_dispatch` 数据库（用户 `delivery_user`），以及 Redis `localhost:6380`。数据库、MySQL 用户和授权需要自行创建，项目不会自动创建它们。如果本机端口、库名或用户名不同，请设置 `DB_URL`、`DB_USERNAME`、`REDIS_HOST` 和 `REDIS_PORT`。当前 Redis 配置没有密码项，需要使用未启用密码的本地 Redis。
+## 三端闭环
+
+| 端 | 角色 | 能做什么 |
+|---|---|---|
+| 商家端 | `MERCHANT` | 自助注册开店、下单、查看自己的订单 |
+| 平台端 | `ADMIN` / `DISPATCHER` | 订单管理、手动/自动派单、骑手管理、看板、操作审计 |
+| 骑手端 | `RIDER` | 接单、开始配送、送达、上报位置 |
+
+订单状态机：`0 待派单 → 1 已派单 → 2 配送中 → 3 已完成`（另有 `4 已取消`）
+
+## 技术栈
+
+| 分类 | 技术 |
+|---|---|
+| 框架 | Spring Boot 3.5、Spring MVC、Spring Security（Session + CSRF） |
+| 数据 | MySQL 8.4、MyBatis-Plus |
+| 缓存 | Redis 7.4（Cache Aside、GEO 索引、Lua 脚本） |
+| 消息 | RocketMQ 5.3（Transactional Outbox） |
+| 可观测 | Actuator、springdoc（Swagger）、traceId（MDC） |
+| 测试 | JUnit 5、Mockito、MockMvc，113 个用例 |
+| 前端 | Vue 3 + TypeScript + Vite + Element Plus |
+| 运维 | Docker、Docker Compose |
+
+## 关键设计
+
+1. **并发正确性**：派单用条件更新（`WHERE current_order_count < 3` 与 `WHERE status = 0`），抢单失败时整个事务回滚，已占用的名额随之释放。100 并发抢同一骑手，结果恰好 3 单成功、97 单拒绝。
+2. **最终一致性**：业务与事件在同一 MySQL 事务写入 Outbox，后台投递 RocketMQ，Broker 确认后才标记已投递；消费失败由 Broker 重试，超额进死信；另有定时补偿扫描兜底。
+3. **缓存治理**：Cache Aside + 空值缓存（穿透）+ 随机 TTL（雪崩）+ 互斥重建（击穿）；GEO 只是派生索引，可由定时校准恢复。
+4. **接口限流**：Redis + Lua 实现令牌桶（原子补充与扣减），按用户 / IP 分维度，P0–P3 业务分级，超限返回 `429` + `Retry-After`；位置上报另用「最小间隔」语义限流。
+5. **链路追踪**：traceId 在请求入口生成并写入 MDC，随 Outbox 记录持久化、经 MQ 消息传递，消费端恢复后同一条链路日志可串联。
+6. **权限与数据归属**：四种角色 + 资源级校验；商家端和骑手端接口**不接收** `merchantId` / `riderId`，身份一律从登录态解析，跨租户访问返回 `403`。
+
+## 实测数据
+
+| 指标 | 数值 | 来源 |
+|---|---|---|
+| 单元测试 | 113 个全通过 | `mvn test` |
+| 骑手详情接口 | 1712 rps，P99 86.57 ms | `verification/` |
+| GEO 附近查询 | 1126 rps，P99 66.72 ms | `verification/` |
+| 100 并发抢同一骑手 | 3 成功 / 97 拒绝，零超卖 | `verification/` |
+| 删除 vs 派单竞态 | 30 轮零容量泄漏 | `verification/` |
+| Outbox → 派单完成 | 4190 ms | `verification/` |
+
+## 快速开始
+
+### 方式一：Docker（整套后端）
+
+```bash
+docker compose up -d
+```
+
+启动 MySQL、Redis、RocketMQ 与应用，首次启动自动建表。
+
+### 方式二：本地开发（前端热更新）
+
+后端跑在本机，中间件用 Docker：
+
+```bash
+export DB_PASSWORD='你的本地数据库密码'
+export BOOTSTRAP_ADMIN_PASSWORD='至少八位'
+export REDIS_PORT=6380
+mvn spring-boot:run
+```
+
+```bash
+cd frontend-vue
+npm install
+npm run dev        # http://localhost:5173
+```
+
+管理员账号由 `BOOTSTRAP_ADMIN_USERNAME` / `BOOTSTRAP_ADMIN_PASSWORD` 在首次启动时创建；
+商家可自助注册，骑手由平台端创建。
+
+## 本地环境说明
+
+应用依赖 MySQL、Redis 和 RocketMQ。整套环境可以用 `docker compose up -d` 起（见上方「快速开始」）；如果只想把中间件放进 Docker、应用跑在本机（便于热更新），用 `docker compose -f docker-compose.rocketmq.yml up -d` 起 RocketMQ，MySQL 和 Redis 用本机已有的实例。默认连接 MySQL `localhost:3307` 上的 `delivery_dispatch` 数据库（用户 `delivery_user`），以及 Redis `localhost:6380`。数据库、MySQL 用户和授权需要自行创建，项目不会自动创建它们。如果本机端口、库名或用户名不同，请设置 `DB_URL`、`DB_USERNAME`、`REDIS_HOST` 和 `REDIS_PORT`。当前 Redis 配置没有密码项，需要使用未启用密码的本地 Redis。
 
 `DB_PASSWORD` 填本机 MySQL 账号的密码；`BOOTSTRAP_ADMIN_PASSWORD` 是应用首次初始化管理员账号时使用的登录密码，两者不是同一个密码。把这些值填入 IDE 的运行配置，或在启动应用的终端中设置。`.env.example` 只提供变量名和示例值，Spring Boot 不会自动读取它；不要把真实密码提交到仓库。
 
@@ -140,6 +215,56 @@ LIMIT 20;
 
 已投递但仍待派单超过 30 秒的订单，还会由补偿任务每 30 秒扫描一次，每轮最多处理 20 条并按订单 ID 轮转。附近没有骑手时保留待派单状态，下轮继续尝试；骑手上线后可自动派单。可用 `DISPATCH_PENDING_RECOVERY_ENABLED=false` 暂停补偿，或用 `DISPATCH_PENDING_RECOVERY_DELAY_MS` 调整扫描间隔；`/actuator/metrics/dispatch.recovery.attempts` 可查看处理、无骑手和异常次数。
 
+## 接口限流
+
+`common/ratelimit/` 实现基于 Redis 的令牌桶：
+
+- **算法**：令牌桶（允许短时突发，避免固定窗口的临界突刺）
+- **原子性**：Redis + Lua，把「补令牌 → 判断 → 扣减 → 写回」一次执行，避免并发超发
+- **时钟**：Lua 内取 `redis.call('TIME')`，多实例下不受机器时钟偏差影响
+- **维度**：已登录按账号 id，匿名按 IP；key 里用规则的 path 模板而非真实 URI（否则每个订单 id 会生成一个独立的桶）
+- **分级**：规则带 `P0`–`P3` 优先级，过载时按业务价值依次牺牲
+- **降级**：Redis 不可用时 **fail-open**（放行并记 WARN），限流组件不成为新的故障点
+- **语义化限流**：位置上报用 `SETNX` 实现「最小间隔 3 秒」，间隔内静默丢弃（不报错，避免客户端重试放大流量）
+
+超限响应：`429` + `Retry-After` + `X-RateLimit-Limit-Level`。阈值在 `application.yml` 的 `rate-limit.rules` 配置，
+压测时可用 `RATE_LIMIT_ENABLED=false` 整体关闭。完整设计见 [`docs/rate-limit-design.md`](docs/rate-limit-design.md)。
+
+## 链路追踪（traceId）
+
+```
+HTTP 请求 → TraceIdFilter 生成/继承 → MDC[traceId]
+              ↓
+         业务日志自动带 [traceId]
+              ↓
+     下单时写入 dispatch_outbox.trace_id
+              ↓
+     发布到 MQ 的 DispatchMessage 带上 traceId
+              ↓
+     消费端 TraceContext.put() 恢复 → 消费日志同一条链路
+```
+
+- 请求头 `X-Trace-Id` 可透传（便于跨服务串联），无则生成 16 位短 id；响应头回写该 id，便于用户反馈问题时定位
+- 换线程（MQ 消费、定时任务）MDC 会丢失，必须手动恢复，并在 `finally` 清理，避免污染线程池
+- 日志格式：`logging.pattern.console` 中的 `%X{traceId}`
+
+## 前端（Vue 3 + TypeScript）
+
+```
+frontend-vue/
+├── src/api/http.ts        axios 封装：自动带 CSRF、401/403/429 统一提示
+├── src/router/index.ts    三端路由 + 登录态与角色守卫
+└── src/views/
+    ├── LoginView.vue           登录
+    ├── MerchantOrdersView.vue  商家下单与订单列表
+    ├── AdminOrdersView.vue     平台订单列表与派单
+    └── RiderWorkbenchView.vue  骑手工作台
+```
+
+- **CSRF**：写请求需带 `X-CSRF-TOKEN`；登录会重建会话并轮换 token，前端登录后重新获取一次
+- **路由守卫**：角色不匹配时跳回自己的首页；但真正的权限在后端，前端守卫只是体验层
+- **429**：按 `Retry-After` 提示用户等待，不自动重试
+
 ## 测试
 
 ```bash
@@ -193,6 +318,22 @@ python3 scripts/recovery_smoke.py --output verification/recovery-smoke-local.jso
 
 > Actuator 的 `metrics` 用于本地学习观测。生产部署时不要在未鉴权的公网接口暴露管理指标。
 
-## 后续开发顺序
+## 已完成 / 未做
 
-登录权限、分页查询、请求 DTO 和操作记录已完成；本阶段专注骑手位置有效期及 GEO 恢复。失败派单处理和人工重试、SSE 订单状态推送、Testcontainers 与 CI 都没有在本阶段开始。课程及学习笔记已由用户移出本仓库；项目运行和接口说明以本 README 为入口。
+**已完成**
+
+- 三端业务闭环（商家自助注册与下单、平台派单、骑手接单送达）
+- 四种角色与资源级权限，跨租户访问返回 403
+- 幂等语义：目标状态已达成返回 200，状态冲突 409，越权 403
+- 接口限流（令牌桶 + 最小间隔 + P0–P3 分级）
+- traceId 贯穿 HTTP 与 MQ
+- Docker 镜像与全栈 compose
+- 113 个单元测试 + `verification/` 下的压测与并发验收脚本
+
+**未做（诚实列出）**
+
+- 未做公网部署与域名、HTTPS、ICP 备案
+- 前端未做单元测试，只有构建与手点验证
+- 失败派单的人工重试入口、SSE 订单状态推送尚未实现
+- 没有接入 CI，也没有 Testcontainers 集成测试
+- 单实例部署，未做多节点与 Redis Cluster 适配
