@@ -327,23 +327,3 @@ python3 scripts/recovery_smoke.py --output verification/recovery-smoke-local.jso
 本机 Maven 的全局和用户级 `settings.xml` 仍有第 53 行 XML 格式警告，但不阻断当前编译、测试和运行；这是本机工具配置问题，不属于项目业务代码。
 
 > Actuator 的 `metrics` 用于本地学习观测。生产部署时不要在未鉴权的公网接口暴露管理指标。
-
-## 已完成 / 未做
-
-**已完成**
-
-- 三端业务闭环（商家自助注册与下单、平台派单、骑手接单送达）
-- 四种角色与资源级权限，跨租户访问返回 403
-- 幂等语义：目标状态已达成返回 200，状态冲突 409，越权 403
-- 接口限流（令牌桶 + 最小间隔 + P0–P3 分级）
-- traceId 贯穿 HTTP 与 MQ
-- Docker 镜像与全栈 compose
-- 113 个单元测试 + `verification/` 下的压测与并发验收脚本
-
-**未做（诚实列出）**
-
-- 未做公网部署与域名、HTTPS、ICP 备案
-- 前端未做单元测试，只有构建与手点验证
-- 失败派单的人工重试入口、SSE 订单状态推送尚未实现
-- 没有接入 CI，也没有 Testcontainers 集成测试
-- 单实例部署，未做多节点与 Redis Cluster 适配
