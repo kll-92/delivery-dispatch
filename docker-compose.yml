@@ -110,6 +110,19 @@ services:
     restart: unless-stopped
     networks: [delivery]
 
+  # ---------- 前端（Nginx 托管 + /api 反代）----------
+  web:
+    build:
+      context: ./frontend-vue
+      dockerfile: Dockerfile
+    container_name: delivery-web
+    depends_on:
+      - app
+    ports:
+      - "3000:80"
+    restart: unless-stopped
+    networks: [delivery]
+
 networks:
   delivery:
     name: delivery-network

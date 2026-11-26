@@ -49,13 +49,23 @@
 
 ## 快速开始
 
-### 方式一：Docker（整套后端）
+### 方式一：Docker（整套，含前端）
 
 ```bash
 docker compose up -d
 ```
 
-启动 MySQL、Redis、RocketMQ 与应用，首次启动自动建表。
+启动 6 个容器：MySQL、Redis、RocketMQ（NameServer + Broker）、应用、前端 Nginx。
+首次启动自动建表（`src/main/resources/sql` 挂载为初始化脚本）。
+
+| 入口 | 地址 |
+|---|---|
+| 前端 | http://localhost:3000 |
+| 后端 API | http://localhost:8080/api/v1 |
+| Swagger | http://localhost:8080/swagger-ui.html |
+
+> 默认数据库密码来自 `DB_PASSWORD` 环境变量；不设置时为 `Delivery123!`。
+> 端口若冲突可改 `docker-compose.yml` 里的 `ports` 映射。
 
 ### 方式二：本地开发（前端热更新）
 
